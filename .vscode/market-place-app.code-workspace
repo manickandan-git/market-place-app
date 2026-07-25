@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../services/notification-service"
+		},
+		{
+			"path": "../services/auth-service"
+		}
+	],
+	"settings": {
+	    "python.analysis.autoImportCompletions": true,
+	    "python.terminal.activateEnvironment": true
+    }
+}

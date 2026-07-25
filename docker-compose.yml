@@ -1,0 +1,50 @@
+services:
+  # 1. The Database Service
+  marketplace-auth-db:
+    image: postgres:16-alpine      # Uses a lightweight, secure Postgres image
+    container_name: marketplace-auth-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=marketplace_auth
+    ports:
+      - "5433:5432"                
+    volumes:
+      -  marketplace_auth_service_postgres_data:/var/lib/postgresql/data # Keeps your data safe when container stops
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d marketplace_auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 2. The Auth Service
+  marketplace-auth-service:
+    build:
+      context: ./services/auth-service 
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - NODE_ENV=development
+      # CRUCIAL: Use the service name "auth-db" as the hostname, NOT "localhost"
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-auth-db:5432/marketplace_auth
+      - REDIS_URL=redis://marketplace-auth-redis:6379/0
+    volumes:
+      - ./services/auth-service:/app
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload"
+    depends_on:
+      marketplace-auth-db:
+        condition: service_healthy
+      marketplace-auth-redis:
+        condition: service_started
+
+  # 3. The Order Service
+  marketplace-auth-redis:
+    image: redis:7-alpine
+    container_name: marketplace-auth-redis
+    ports:
+      - "6380:6379"
+
+# Named volumes block tells Docker where to store the database files on your host machine safely
+volumes:
+  marketplace_auth_service_postgres_data:
