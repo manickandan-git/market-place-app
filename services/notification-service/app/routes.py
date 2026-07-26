@@ -7,11 +7,12 @@ from uuid import UUID
 from fastapi import (
     APIRouter,
     Depends,
-    Header,
     HTTPException,
     Query,
+    Security,
     status,
 )
+from fastapi.security import APIKeyHeader
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,11 +64,14 @@ def get_email_service(
     return EmailService(db)
 
 
+api_key_header = APIKeyHeader(
+    name="X-Internal-API-Key",
+    auto_error=False,
+)
+
+
 def require_internal_api_key(
-    x_internal_api_key: str | None = Header(
-        default=None,
-        alias="X-Internal-API-Key",
-    ),
+    x_internal_api_key: str | None = Security(api_key_header),
     settings: Settings = Depends(get_settings),
 ) -> None:
     """

@@ -116,7 +116,7 @@ services:
       - CELERY_BROKER_URL=redis://marketplace-notification-redis:6379/1
       - CELERY_RESULT_BACKEND=redis://marketplace-notification-redis:6379/2
       - EMAIL_PROVIDER=console
-      - INTERNAL_API_KEY=dev-only-internal-api-key-change-me
+      - INTERNAL_API_KEY=f9fbc3c5dfa3b56d5b0f941f957761894191f287639a772576e450a460a52ec6
       - IDENTITY_SERVICE_URL=http://marketplace-auth-service:8001
     volumes:
       - ./services/notification-service:/app
