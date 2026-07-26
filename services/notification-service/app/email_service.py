@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import traceback
@@ -26,7 +27,6 @@ from app.providers.base import (
     NotificationProviderError,
     PermanentProviderError,
     ProviderResult,
-    RetryableProviderError,
 )
 from app.providers.console import ConsoleEmailProvider
 from app.providers.smtp import SMTPEmailProvider
@@ -415,8 +415,13 @@ class EmailService:
         """
         Deliver a pending or retrying notification.
 
-        The transaction is committed after the attempt is recorded and the
-        notification status is updated.
+        The PROCESSING transition is committed before the provider send call
+        so a worker crash mid-send leaves the notification durably marked as
+        PROCESSING rather than reverting to PENDING/RETRYING. Since
+        `_validate_delivery_state` rejects notifications already in
+        PROCESSING, a redelivered Celery task cannot re-send the message; it
+        fails closed instead of double-sending. A stuck PROCESSING
+        notification needs manual/reconciliation follow-up.
         """
 
         notification = await self.get_notification(
@@ -449,14 +454,16 @@ class EmailService:
         notification.status = NotificationStatus.PROCESSING
         notification.error_message = None
 
-        await self.db.flush()
-
-        message = self._build_email_message(notification)
+        await self.db.commit()
 
         started_at = time.perf_counter()
 
         try:
-            result = self.provider.send(message)
+            message = self._build_email_message(notification)
+
+            result = await asyncio.to_thread(
+                self.provider.send, message
+            )
 
             latency_ms = result.latency_ms or self._elapsed_ms(
                 started_at
@@ -496,25 +503,34 @@ class EmailService:
             ) from exc
 
         except Exception as exc:
+            # Providers are contracted to raise NotificationProviderError for
+            # every transport/delivery failure they can anticipate (see
+            # EmailProvider.send and SMTPEmailProvider's exhaustive smtplib
+            # handling). Anything landing here is therefore a programming
+            # defect, not a delivery failure: retrying it is pointless, since
+            # the same input will fail identically on every attempt. Treat it
+            # as non-retryable so it fails fast instead of silently burning
+            # the notification's retry budget across several attempts before
+            # the underlying bug becomes visible.
             latency_ms = self._elapsed_ms(started_at)
 
             logger.exception(
-                "Unexpected email delivery failure",
+                "Internal error during email delivery",
                 extra={
                     "notification_id": str(notification.id),
                     "provider": self.provider.provider_type.value,
                 },
             )
 
-            unexpected_error = RetryableProviderError(
-                f"Unexpected provider failure: {exc}",
-                response_code="UNEXPECTED_PROVIDER_ERROR",
+            internal_error = PermanentProviderError(
+                f"Internal error while sending notification: {exc}",
+                response_code="INTERNAL_ERROR",
             )
 
             self._record_provider_failure(
                 notification=notification,
                 attempt_number=attempt_number,
-                error=unexpected_error,
+                error=internal_error,
                 latency_ms=latency_ms,
                 error_stacktrace=traceback.format_exc(),
             )
@@ -524,13 +540,15 @@ class EmailService:
             raise EmailDeliveryError(
                 str(exc),
                 notification_id=notification.id,
-                retryable=True,
-                response_code="UNEXPECTED_PROVIDER_ERROR",
+                retryable=False,
+                response_code="INTERNAL_ERROR",
             ) from exc
 
     async def retry_notification(
         self,
         notification_id: UUID,
+        *,
+        reset_retry_count: bool = False,
     ) -> Notification:
         """
         Move an eligible failed notification into retrying state.
@@ -550,7 +568,9 @@ class EmailService:
                 "Only failed or retrying notifications can be retried"
             )
 
-        if notification.retry_count >= notification.max_retry_count:
+        if reset_retry_count:
+            notification.retry_count = 0
+        elif notification.retry_count >= notification.max_retry_count:
             raise NotificationStateError(
                 "Maximum retry count has been reached"
             )

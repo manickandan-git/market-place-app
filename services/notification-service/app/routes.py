@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -85,7 +86,9 @@ def require_internal_api_key(
             detail="Internal API authentication is not configured",
         )
 
-    if x_internal_api_key != configured_key:
+    if not x_internal_api_key or not hmac.compare_digest(
+        x_internal_api_key, configured_key
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid internal API key",
@@ -616,7 +619,8 @@ async def retry_failed_notification(
 
     try:
         notification = await service.retry_notification(
-            notification_id
+            notification_id,
+            reset_retry_count=request.reset_retry_count,
         )
 
         countdown = request.delay_seconds or 0

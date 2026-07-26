@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -18,8 +19,8 @@ from app.models import (
     NotificationStatus,
     ProviderType,
 )
+from app.providers.base import EmailMessage, ProviderResult
 from tests.conftest import MockEmailProvider
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -314,6 +315,48 @@ async def test_send_notification_creates_delivery_attempt(
     assert attempt.attempt_number == 1
 
 
+async def test_worker_crash_mid_send_blocks_duplicate_redelivery(
+    db_session: AsyncSession,
+    mock_email_provider: MockEmailProvider,
+    pending_notification: Notification,
+) -> None:
+    """
+    If the process is killed after the provider accepts the message but
+    before the success commit (simulated here by an exception that escapes
+    the `except Exception` handlers, like a real worker kill would), the
+    PROCESSING transition must already be durable so a Celery redelivery of
+    the same task cannot send the notification a second time.
+    """
+
+    def crash_during_send(
+        message: EmailMessage,
+    ) -> ProviderResult:
+        raise asyncio.CancelledError("worker killed mid-send")
+
+    mock_email_provider.send = crash_during_send  # type: ignore[method-assign]
+
+    service = create_email_service(
+        db_session,
+        mock_email_provider,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.send_notification(pending_notification.id)
+
+    notification = await service.get_notification(
+        pending_notification.id,
+        include_attempts=True,
+    )
+
+    assert notification.status == NotificationStatus.PROCESSING
+
+    with pytest.raises(
+        NotificationStateError,
+        match="already being processed",
+    ):
+        await service.send_notification(pending_notification.id)
+
+
 async def test_send_notification_with_retryable_failure(
     db_session: AsyncSession,
     mock_email_provider: MockEmailProvider,
@@ -398,6 +441,89 @@ async def test_send_notification_with_permanent_failure(
     assert len(notification.attempts) == 1
     assert notification.attempts[0].success is False
     assert notification.attempts[0].retryable is False
+
+
+async def test_send_notification_unexpected_bug_is_not_retryable(
+    db_session: AsyncSession,
+    mock_email_provider: MockEmailProvider,
+    pending_notification: Notification,
+) -> None:
+    """
+    An exception that isn't a NotificationProviderError indicates a
+    programming defect (providers are contracted to wrap every delivery
+    failure), not a transient delivery failure. It must fail immediately
+    instead of consuming the notification's retry budget on attempts that
+    can never succeed.
+    """
+
+    def buggy_send(message: EmailMessage) -> ProviderResult:
+        raise TypeError("provider contract violated")
+
+    mock_email_provider.send = buggy_send  # type: ignore[method-assign]
+
+    service = create_email_service(
+        db_session,
+        mock_email_provider,
+    )
+
+    with pytest.raises(EmailDeliveryError) as exception_info:
+        await service.send_notification(
+            pending_notification.id
+        )
+
+    error = exception_info.value
+
+    assert error.retryable is False
+
+    notification = await service.get_notification(
+        pending_notification.id,
+        include_attempts=True,
+    )
+
+    assert notification.status == NotificationStatus.FAILED
+    assert len(notification.attempts) == 1
+    assert notification.attempts[0].retryable is False
+
+
+async def test_send_notification_message_build_bug_is_recorded(
+    db_session: AsyncSession,
+    mock_email_provider: MockEmailProvider,
+    pending_notification: Notification,
+) -> None:
+    """
+    A bug while building the outgoing message must not leave the
+    notification wedged in PROCESSING: it happens after the PROCESSING
+    transition is committed, so it needs to be caught and recorded like any
+    other internal defect, not left to propagate uncaught.
+    """
+
+    service = create_email_service(
+        db_session,
+        mock_email_provider,
+    )
+
+    def buggy_build_email_message(
+        notification: Notification,
+    ) -> EmailMessage:
+        raise TypeError("malformed template_data")
+
+    service._build_email_message = (  # type: ignore[method-assign]
+        buggy_build_email_message
+    )
+
+    with pytest.raises(EmailDeliveryError) as exception_info:
+        await service.send_notification(
+            pending_notification.id
+        )
+
+    assert exception_info.value.retryable is False
+
+    notification = await service.get_notification(
+        pending_notification.id,
+        include_attempts=True,
+    )
+
+    assert notification.status == NotificationStatus.FAILED
 
 
 async def test_send_notification_not_found(
@@ -547,6 +673,33 @@ async def test_retry_notification_at_maximum_attempts_is_rejected(
         await service.retry_notification(
             failed_notification.id
         )
+
+
+async def test_retry_notification_reset_retry_count_bypasses_maximum(
+    db_session: AsyncSession,
+    mock_email_provider: MockEmailProvider,
+    failed_notification: Notification,
+) -> None:
+    failed_notification.retry_count = 3
+    failed_notification.max_retry_count = 3
+
+    await db_session.flush()
+
+    service = create_email_service(
+        db_session,
+        mock_email_provider,
+    )
+
+    notification = await service.retry_notification(
+        failed_notification.id,
+        reset_retry_count=True,
+    )
+
+    assert notification.status in {
+        NotificationStatus.PENDING,
+        NotificationStatus.RETRYING,
+    }
+    assert notification.retry_count == 0
 
 
 async def test_cancel_pending_notification(

@@ -8,6 +8,6 @@ COPY app ./app
 
 RUN pip install --no-cache-dir .
 
-EXPOSE 8001
+EXPOSE 8002
 
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002"]

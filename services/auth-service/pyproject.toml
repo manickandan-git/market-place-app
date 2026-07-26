@@ -1,5 +1,5 @@
 [project]
-name = "marketplace-auth-srvice"
+name = "marketplace-auth-service"
 version = "0.2.0"
 description = "Stage 1 auth service for a marketplace platform"
 requires-python = ">=3.11"

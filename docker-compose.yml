@@ -54,6 +54,80 @@ services:
     profiles:
       - dev # <-- This hides the service unless explicitly invoked
 
+  # 5. The Notification Database
+  marketplace-notification-db:
+    image: postgres:16-alpine
+    container_name: marketplace-notification-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=marketplace_notifications
+    ports:
+      - "5434:5432"
+    volumes:
+      - marketplace_notification_service_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d marketplace_notifications"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 6. The Notification Redis (cache + Celery broker/backend)
+  marketplace-notification-redis:
+    image: redis:7-alpine
+    container_name: marketplace-notification-redis
+    ports:
+      - "6381:6379"
+
+  # 7. The Notification Service (API)
+  marketplace-notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-notification-db:5432/marketplace_notifications
+      - REDIS_URL=redis://marketplace-notification-redis:6379/1
+      - CELERY_BROKER_URL=redis://marketplace-notification-redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://marketplace-notification-redis:6379/2
+      - EMAIL_PROVIDER=console
+      - INTERNAL_API_KEY=f9fbc3c5dfa3b56d5b0f941f957761894191f287639a772576e450a460a52ec6
+      - IDENTITY_SERVICE_URL=http://marketplace-auth-service:8001
+    volumes:
+      - ./services/notification-service:/app
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload"
+    depends_on:
+      marketplace-notification-db:
+        condition: service_healthy
+      marketplace-notification-redis:
+        condition: service_started
+
+  # 8. The Notification Worker (Celery)
+  marketplace-notification-worker:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-notification-db:5432/marketplace_notifications
+      - REDIS_URL=redis://marketplace-notification-redis:6379/1
+      - CELERY_BROKER_URL=redis://marketplace-notification-redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://marketplace-notification-redis:6379/2
+      - EMAIL_PROVIDER=console
+      - INTERNAL_API_KEY=dev-only-internal-api-key-change-me
+      - IDENTITY_SERVICE_URL=http://marketplace-auth-service:8001
+    volumes:
+      - ./services/notification-service:/app
+    command: sh -c "celery -A app.celery_app worker --loglevel=info -Q notifications,notification-retries"
+    depends_on:
+      marketplace-notification-db:
+        condition: service_healthy
+      marketplace-notification-redis:
+        condition: service_started
+
 # Named volumes block tells Docker where to store the database files on your host machine safely
 volumes:
   marketplace_auth_service_postgres_data:
+  marketplace_notification_service_postgres_data:

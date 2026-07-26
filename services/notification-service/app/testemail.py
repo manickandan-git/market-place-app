@@ -44,6 +44,8 @@ async def main() -> None:
         print(delivered.scheduled_at)
         print(delivered.sent_at)
         print(delivered.failed_at)
-        print(delivered.error_message)      
+        print(delivered.error_message)
 
-asyncio.run(main())
+
+if __name__ == "__main__":
+    asyncio.run(main())

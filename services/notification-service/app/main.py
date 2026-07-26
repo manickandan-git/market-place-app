@@ -15,7 +15,7 @@ from app.database import (
     check_database_connection,
     close_database_connections,
 )
-from app.email_service import EmailServiceError
+from app.email_service import EmailService, EmailServiceError
 from app.routes import router as notification_router
 from app.schemas import (
     DependencyHealth,

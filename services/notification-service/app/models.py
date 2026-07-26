@@ -198,6 +198,15 @@ class Notification(Base):
         if kwargs.get("template_name") is None:
             kwargs["template_name"] = "direct"
 
+        # These four are popped out and re-applied via their property
+        # setters *after* super().__init__ runs, rather than left in kwargs.
+        # SQLAlchemy's declarative constructor setattr()s every kwarg in the
+        # order given, and these four are properties backed by keys inside
+        # the template_data dict. If they stayed in kwargs, a caller passing
+        # both e.g. recipient_name= and template_data= (in that order, as
+        # the test fixtures in conftest.py do) would have the setter's write
+        # to template_data clobbered by the later template_data= assignment.
+        # Popping + re-applying afterward makes construction order-independent.
         recipient_name = kwargs.pop("recipient_name", None)
         sender_name = kwargs.pop("sender_name", None)
         reply_to_email = kwargs.pop("reply_to_email", None)

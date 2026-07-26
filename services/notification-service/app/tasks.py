@@ -8,6 +8,7 @@ from celery import Task
 from celery.exceptions import MaxRetriesExceededError
 
 from app.celery_app import celery_app
+from app.config import get_settings
 from app.database import AsyncSessionLocal
 from app.email_service import (
     EmailDeliveryError,
@@ -17,19 +18,29 @@ from app.email_service import (
 
 logger = logging.getLogger(__name__)
 
+settings = get_settings()
+
 
 class NotificationTask(Task):
     """
     Base Celery task.
 
     Adds automatic retry support and structured logging.
+
+    retry_backoff is set to the configured base delay (rather than the bare
+    `True` default of a 1-second base) so CELERY_RETRY_DELAY_SECONDS actually
+    controls the exponential-backoff schedule. Call sites must not pass an
+    explicit `countdown=` to `retry()`, since that bypasses retry_backoff/
+    retry_jitter entirely and forces a flat delay on every attempt.
     """
 
     autoretry_for = ()
 
-    retry_backoff = True
+    retry_backoff = settings.celery_retry_delay_seconds
     retry_jitter = True
-    retry_kwargs = {"max_retries": 5}
+    retry_kwargs = {
+        "max_retries": settings.celery_task_max_retries,
+    }
 
 
 @celery_app.task(
@@ -111,10 +122,7 @@ async def _send_notification(
             if exc.retryable:
 
                 try:
-                    raise task.retry(
-                        countdown=30,
-                        exc=exc,
-                    )
+                    raise task.retry(exc=exc)
 
                 except MaxRetriesExceededError:
 
@@ -173,10 +181,7 @@ async def _retry_notification(
 
         except EmailDeliveryError as exc:
             if exc.retryable:
-                raise task.retry(
-                    countdown=30,
-                    exc=exc,
-                )
+                raise task.retry(exc=exc)
 
             raise
 

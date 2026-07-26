@@ -672,7 +672,7 @@ wheels = [
 ]
 
 [[package]]
-name = "marketplace-auth-srvice"
+name = "marketplace-auth-service"
 version = "0.2.0"
 source = { virtual = "." }
 dependencies = [

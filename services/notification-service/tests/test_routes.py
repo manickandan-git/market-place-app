@@ -629,6 +629,66 @@ async def test_retry_failed_notification_without_delay(
     assert call_kwargs["countdown"] == 0
 
 
+@patch("app.routes.retry_notification.apply_async")
+async def test_retry_failed_notification_reset_retry_count(
+    apply_async_mock: MagicMock,
+    client: AsyncClient,
+    internal_api_headers: dict[str, str],
+    failed_notification: Notification,
+    db_session: AsyncSession,
+) -> None:
+    apply_async_mock.return_value = mock_celery_result(
+        "retry-task-reset"
+    )
+
+    failed_notification.retry_count = (
+        failed_notification.max_retry_count
+    )
+    await db_session.flush()
+
+    response = await client.post(
+        (
+            "/api/v1/notifications/"
+            f"{failed_notification.id}/retry"
+        ),
+        headers=internal_api_headers,
+        json={
+            "reset_retry_count": True,
+        },
+    )
+
+    assert response.status_code == 202
+
+    payload = response.json()
+
+    assert payload["notification_id"] == str(
+        failed_notification.id
+    )
+
+
+async def test_retry_failed_notification_at_maximum_without_reset_is_rejected(
+    client: AsyncClient,
+    internal_api_headers: dict[str, str],
+    failed_notification: Notification,
+    db_session: AsyncSession,
+) -> None:
+    failed_notification.retry_count = (
+        failed_notification.max_retry_count
+    )
+    await db_session.flush()
+
+    response = await client.post(
+        (
+            "/api/v1/notifications/"
+            f"{failed_notification.id}/retry"
+        ),
+        headers=internal_api_headers,
+        json={},
+    )
+
+    assert response.status_code == 409
+
+
 async def test_retry_sent_notification_is_rejected(
     client: AsyncClient,
     internal_api_headers: dict[str, str],
