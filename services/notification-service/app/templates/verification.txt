@@ -1,0 +1,36 @@
+{{ company_name | default("Marketplace") }}
+
+EMAIL VERIFICATION
+
+Hello {{ first_name }},
+
+Thank you for creating your Marketplace account.
+
+To activate your account, please verify your email address by opening the link below:
+
+{{ verification_url }}
+
+Verification Details
+--------------------
+Email: {{ recipient_email }}
+Verification Token: {{ verification_token }}
+Expires In: {{ expires_in_minutes }} minutes
+
+If clicking the link does not work, copy and paste it into your web browser.
+
+Security Notice
+---------------
+If you did not create a Marketplace account, you can safely ignore this email. No changes will be made unless the verification link is used.
+
+Need help?
+Contact our support team:
+
+{{ support_email }}
+
+Thank you,
+
+Marketplace Team
+
+© {{ current_year }}
+{{ company_name | default("Marketplace") }}
+All Rights Reserved.
