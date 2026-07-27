@@ -1,0 +1,30 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: notification-api
+  namespace: marketplace
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notification-service
+      app.kubernetes.io/component: api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: notification-worker
+  namespace: marketplace
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/component: worker
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notification-service
+      app.kubernetes.io/component: worker
+

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marketplace
+  labels:
+    app.kubernetes.io/part-of: marketplace
+    kubernetes.io/metadata.name: marketplace
+

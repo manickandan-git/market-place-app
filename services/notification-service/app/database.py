@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
 
@@ -23,11 +24,18 @@ class Base(DeclarativeBase):
     pass
 
 
+# NullPool is required, not just a safe default: this module is imported by
+# both the FastAPI app (one persistent event loop for the process lifetime)
+# and the Celery worker (tasks.py runs `asyncio.run(...)` once per task,
+# creating a brand-new event loop every time). asyncpg connections are bound
+# to the event loop that created them. A pooled connection checked out in a
+# later, different event loop crashes pool_pre_ping's liveness check with
+# "got Future ... attached to a different loop". NullPool opens a fresh
+# connection per checkout instead of reusing one across loop boundaries.
 engine: AsyncEngine = create_async_engine(
     settings.database_url,
     echo=settings.database_echo,
-    pool_pre_ping=True,
-    pool_recycle=1800,
+    poolclass=NullPool,
 )
 
 

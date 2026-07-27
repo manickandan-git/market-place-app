@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     max_failed_login_attempts: int = 5
     account_lock_minutes: int = 15
 
+    # Notification Service integration
+    notification_service_url: str = "http://localhost:8002"
+    notification_service_api_key: str = "dev-only-internal-api-key-change-me"
+    notification_service_timeout_seconds: float = 5.0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

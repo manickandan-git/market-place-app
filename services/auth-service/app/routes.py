@@ -25,6 +25,7 @@ from app.models import (
     UserRole,
     VerificationToken,
 )
+from app.notification_client import get_notification_client
 from app.schemas import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -321,6 +322,20 @@ async def register(
     await session.commit()
     await session.refresh(user)
 
+    await get_notification_client().send_verification_email(
+        recipient_email=user.email,
+        recipient_name=(
+            f"{user.first_name} {user.last_name}".strip()
+        ),
+        first_name=user.first_name,
+        verification_token=raw_verification_token,
+        expires_in_minutes=(
+            settings.email_verification_expire_minutes
+        ),
+        user_id=user.id,
+        external_reference=str(user.id),
+    )
+
     return RegisterResponse(
         user_id=str(user.id),
         email=user.email,
@@ -470,6 +485,20 @@ async def resend_verification(
     )
 
     await session.commit()
+
+    await get_notification_client().send_verification_email(
+        recipient_email=user.email,
+        recipient_name=(
+            f"{user.first_name} {user.last_name}".strip()
+        ),
+        first_name=user.first_name,
+        verification_token=raw_token,
+        expires_in_minutes=(
+            settings.email_verification_expire_minutes
+        ),
+        user_id=user.id,
+        external_reference=str(user.id),
+    )
 
     return ResendVerificationResponse(
         message=generic_message,
@@ -896,6 +925,20 @@ async def forgot_password(
 
     await session.commit()
 
+    await get_notification_client().send_password_reset_email(
+        recipient_email=user.email,
+        recipient_name=(
+            f"{user.first_name} {user.last_name}".strip()
+        ),
+        first_name=user.first_name,
+        reset_token=raw_reset_token,
+        expires_in_minutes=(
+            settings.password_reset_expire_minutes
+        ),
+        user_id=user.id,
+        external_reference=str(user.id),
+    )
+
     return ForgotPasswordResponse(
         message=generic_message,
         reset_token=expose_development_token(
@@ -998,6 +1041,18 @@ async def reset_password(
 
     await session.commit()
 
+    await get_notification_client().send_password_changed_email(
+        recipient_email=user.email,
+        recipient_name=(
+            f"{user.first_name} {user.last_name}".strip()
+        ),
+        first_name=user.first_name,
+        changed_at=utc_now(),
+        ip_address=get_client_ip(request),
+        user_id=user.id,
+        external_reference=str(user.id),
+    )
+
     return MessageResponse(
         message=(
             "Password reset successfully. "
@@ -1078,6 +1133,19 @@ async def change_password(
     )
 
     await session.commit()
+
+    await get_notification_client().send_password_changed_email(
+        recipient_email=current_user.email,
+        recipient_name=(
+            f"{current_user.first_name} "
+            f"{current_user.last_name}".strip()
+        ),
+        first_name=current_user.first_name,
+        changed_at=utc_now(),
+        ip_address=get_client_ip(request),
+        user_id=current_user.id,
+        external_reference=str(current_user.id),
+    )
 
     return MessageResponse(
         message=(

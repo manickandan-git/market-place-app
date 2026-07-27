@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -16,7 +17,6 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -148,6 +148,45 @@ async def override_database_dependency(
     yield
 
     app.dependency_overrides.clear()
+
+
+# ============================================================
+# Notification Service outbound calls
+# ============================================================
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def mock_notification_service(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[AsyncMock | None, None]:
+    """
+    Prevent tests from making real HTTP calls to the Notification Service.
+
+    Patches NotificationClient._post directly (not httpx.AsyncClient.post,
+    which the ASGI-transport-based `client` test fixture also relies on for
+    every request against the app under test) so every test runs isolated
+    from the network by default. Yields the mock so a specific test can
+    override `.side_effect` to simulate a Notification Service outage.
+
+    Tests that need to exercise NotificationClient's real HTTP/error-handling
+    behavior can opt out with @pytest.mark.real_notification_client.
+    """
+
+    if request.node.get_closest_marker(
+        "real_notification_client"
+    ):
+        yield None
+        return
+
+    mock_post = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(
+        "app.notification_client.NotificationClient._post",
+        mock_post,
+    )
+
+    yield mock_post
 
 
 # ============================================================

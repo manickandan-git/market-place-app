@@ -1,0 +1,71 @@
+# Optional: this service currently defines no periodic Celery schedule.
+# Add this file to kustomization.yaml only after configuring beat_schedule.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-beat
+  namespace: marketplace
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/component: beat
+    app.kubernetes.io/part-of: marketplace
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notification-service
+      app.kubernetes.io/component: beat
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notification-service
+        app.kubernetes.io/component: beat
+        app.kubernetes.io/part-of: marketplace
+    spec:
+      serviceAccountName: notification-service
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: beat
+          image: marketplace-notification-service:latest
+          imagePullPolicy: IfNotPresent
+          command: ["celery"]
+          args:
+            - "-A"
+            - "app.celery_app:celery_app"
+            - "beat"
+            - "--loglevel=INFO"
+            - "--schedule=/tmp/celerybeat-schedule"
+          envFrom:
+            - configMapRef:
+                name: notification-service-config
+            - secretRef:
+                name: notification-service-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+
