@@ -244,8 +244,8 @@ The MVP will not operate all three protocols.
    outbox events without synchronously deleting required data.
 9. Every mutation writes an audit record and appropriate outbox event in the
    same database transaction.
-10. Alembic upgrades a clean PostgreSQL database and downgrades the Stage 1
-    revision in tests.
+10. Alembic upgrades a clean PostgreSQL database and downgrades in the
+    tests.
 11. Unit, API integration, authorization, validation, idempotency, and
     concurrency tests pass locally and in Docker Compose.
 12. Identity and Notification integration tests pass without either service

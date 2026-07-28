@@ -1,4 +1,4 @@
-# Marketplace User Service — Stage 1
+# Marketplace User Service
 
 Production-oriented FastAPI microservice for buyer/seller profiles, addresses,
 preferences, notification consent, privacy workflows, audit records, and
@@ -32,7 +32,7 @@ and Docker Compose integration come first.
 
 ```text
 user-service/
-├── alembic/                 # Migration runtime and Stage 1 revision
+├── alembic/                 # Migration runtime
 ├── app/
 │   ├── dependencies/        # JWT, role, If-Match, idempotency headers
 │   ├── middleware/          # Correlation ID

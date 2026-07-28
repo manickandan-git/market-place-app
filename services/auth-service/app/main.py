@@ -41,8 +41,8 @@ app = FastAPI(
     title=settings.app_name,
     version=APP_VERSION,
     description=(
-        "Automated Swagger docs demonstration for Marketplace Stage 1 Auth Service,"
-        "Marketplace Stage 1 Auth Service supporting registration, "
+        "Automated Swagger docs demonstration for Marketplace Auth Service,"
+        "Marketplace Auth Service supporting registration, "
         "email verification, login, JWT authentication, password recovery, "
         "session management, account lockout, and audit events."
     ),

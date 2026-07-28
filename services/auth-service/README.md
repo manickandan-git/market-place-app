@@ -1,4 +1,4 @@
-# Marketplace Stage 1 — Auth Service v0.2
+# Marketplace Auth Service v0.2
 
 This increment adds controlled database migrations, password recovery, protected user access, authentication dependencies, and async integration tests.
 

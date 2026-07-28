@@ -19,7 +19,7 @@ from app.database import Base
 
 class UserRole(enum.StrEnum):
     """
-    Roles supported by the Stage 1 marketplace application.
+    Roles supported by the marketplace application.
     """
 
     BUYER = "BUYER"
