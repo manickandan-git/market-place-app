@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hmac
-from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import (
@@ -27,7 +26,6 @@ from app.email_service import (
 )
 from app.models import (
     Notification,
-    NotificationPriority,
     NotificationStatus,
     ProviderType,
 )

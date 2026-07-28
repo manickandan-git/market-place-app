@@ -181,7 +181,7 @@ async def _retry_notification(
 
         except EmailDeliveryError as exc:
             if exc.retryable:
-                raise task.retry(exc=exc)
+                raise task.retry(exc=exc) from exc
 
             raise
 

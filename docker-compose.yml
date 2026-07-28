@@ -160,7 +160,57 @@ services:
       marketplace-auth-service:
         condition: service_started
 
-  # 10. The Notification Worker (Celery)
+  # 11. The Product Service Database
+  marketplace-product-db:
+    image: postgres:16-alpine
+    container_name: marketplace-product-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=product_service
+    ports:
+      - "5436:5432"
+    volumes:
+      - marketplace_product_service_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d product_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 12. The Product Service (API)
+  marketplace-product-service:
+    build:
+      context: ./services/product-service
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-product-db:5432/product_service
+      # JWT_ISSUER is a literal string compared against the access token's
+      # "iss" claim, which auth-service bakes in from its own JWT_ISSUER
+      # setting (http://localhost:8001) — this must match that value exactly
+      # and is NOT a network address, unlike JWT_JWKS_URL below.
+      - JWT_ISSUER=http://localhost:8001
+      - JWT_AUDIENCE=marketplace-api
+      - JWT_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      - CORS_ORIGINS=["http://localhost:3000"]
+    volumes:
+      # Only source dirs are mounted (not the whole service directory): the
+      # image's dependencies are a uv-managed .venv baked in at build time,
+      # and bind-mounting the full directory would shadow it with the host's
+      # own (Windows) .venv and break the container.
+      - ./services/product-service/app:/app/app
+      - ./services/product-service/alembic:/app/alembic
+    command: sh -c "uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8004 --reload"
+    depends_on:
+      marketplace-product-db:
+        condition: service_healthy
+      marketplace-auth-service:
+        condition: service_started
+
+  # 13. The Notification Worker (Celery)
   marketplace-notification-worker:
     build:
       context: ./services/notification-service
@@ -188,3 +238,4 @@ volumes:
   marketplace_auth_service_postgres_data:
   marketplace_notification_service_postgres_data:
   marketplace_user_service_postgres_data:
+  marketplace_product_service_postgres_data:

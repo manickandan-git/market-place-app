@@ -4,8 +4,8 @@ from app.providers.base import (
     NotificationProviderError,
     PermanentProviderError,
     ProviderResult,
-    RetryableProviderError,
     ProviderType,
+    RetryableProviderError,
 )
 
 __all__ = [

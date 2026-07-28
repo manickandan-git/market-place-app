@@ -11,7 +11,6 @@ from celery.signals import (
 )
 
 from app.config import get_settings
-from app.database import close_database_connections
 
 settings = get_settings()
 

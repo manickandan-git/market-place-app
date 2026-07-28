@@ -4,7 +4,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models import UserRole
 
-
 # ============================================================
 # Registration
 # ============================================================

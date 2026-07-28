@@ -3,12 +3,12 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Enum,
     ForeignKey,
     Integer,
-    JSON,
     String,
     func,
 )
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
-class UserRole(str, enum.Enum):
+class UserRole(enum.StrEnum):
     """
     Roles supported by the Stage 1 marketplace application.
     """

@@ -1,0 +1,32 @@
+{
+  "git.openRepositoryInParentFolders": "always",
+
+  // 1. Tell Pylance to auto-discover pyright/pyproject configs in subfolders
+  "python.analysis.useNearestConfiguration": true,
+
+  // 2. Map import resolution paths for shared code across sub-packages
+  "python.analysis.extraPaths": [
+  ],
+
+  // 3. Prevent global test runner confusion (force sub-folder execution)
+  "python.testing.cwd": "${workspaceFolder}",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+
+  // 4. Default linter and formatter settings (using Ruff)
+  "ruff.importStrategy": "fromEnvironment",
+  "ruff.enable": true,
+  "[python]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+
+  // 5. Hide virtual environments from the file explorer to keep it clean
+  "files.exclude": {
+    "**/.venv": true,
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.env": true
+  }
+}

@@ -191,13 +191,7 @@ class SMTPEmailProvider(EmailProvider):
                 response_code=str(exc.smtp_code),
             ) from exc
 
-        except (
-            TimeoutError,
-            socket.timeout,
-            socket.gaierror,
-            ConnectionError,
-            OSError,
-        ) as exc:
+        except (TimeoutError, socket.gaierror, ConnectionError, OSError) as exc:
             raise RetryableProviderError(
                 f"SMTP network error: {exc}",
                 response_code="SMTP_NETWORK_ERROR",

@@ -27,7 +27,7 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
 @pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+def event_loop() -> Generator[asyncio.AbstractEventLoop]:
     """
     Create one asyncio event loop for the complete test session.
 
@@ -48,7 +48,7 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 
 
 @pytest_asyncio.fixture(scope="session")
-async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
+async def test_engine() -> AsyncGenerator[AsyncEngine]:
     """
     Create an in-memory SQLite database for integration tests.
 
@@ -105,7 +105,7 @@ async def test_session_factory(
 @pytest_asyncio.fixture(autouse=True)
 async def clean_database(
     test_engine: AsyncEngine,
-) -> AsyncGenerator[None, None]:
+) -> AsyncGenerator[None]:
     """
     Remove all records before every test.
 
@@ -128,12 +128,12 @@ async def clean_database(
 @pytest_asyncio.fixture
 async def override_database_dependency(
     test_session_factory: async_sessionmaker[AsyncSession],
-) -> AsyncGenerator[None, None]:
+) -> AsyncGenerator[None]:
     """
     Replace the production get_db dependency with the test database session.
     """
 
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+    async def override_get_db() -> AsyncGenerator[AsyncSession]:
         async with test_session_factory() as session:
             try:
                 yield session
@@ -159,7 +159,7 @@ async def override_database_dependency(
 async def mock_notification_service(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
-) -> AsyncGenerator[AsyncMock | None, None]:
+) -> AsyncGenerator[AsyncMock | None]:
     """
     Prevent tests from making real HTTP calls to the Notification Service.
 
@@ -197,7 +197,7 @@ async def mock_notification_service(
 @pytest_asyncio.fixture
 async def client(
     override_database_dependency: None,
-) -> AsyncGenerator[AsyncClient, None]:
+) -> AsyncGenerator[AsyncClient]:
     """
     Return an asynchronous HTTP client connected directly to FastAPI.
 

@@ -1,4 +1,4 @@
-# Marketplace User Service — Stage 1 Scope
+# Marketplace User Service
 
 ## 1. Purpose and ownership
 
@@ -20,7 +20,7 @@ preference, privacy-request, and seller-profile data.
 The User Service never stores passwords, issues tokens, or changes roles. It
 validates Identity-issued JWTs and uses the immutable `sub` claim as `user_id`.
 
-## 2. Stage 1 functional scope
+## 2. functional scope
 
 ### Profiles
 
@@ -42,7 +42,7 @@ validates Identity-issued JWTs and uses the immutable `sub` claim as `user_id`.
 - Create, list, retrieve, partially update, and delete addresses owned by the
   authenticated user.
 - Address types are `shipping` and `billing`; one physical address may be
-  represented separately for each type in Stage 1.
+  represented separately for each type.
 - At most one default address exists per user and address type.
 - Making an address default atomically clears the previous default of the same
   type.
@@ -199,7 +199,7 @@ credentials, tokens, complete addresses, or unnecessary personal data.
 | MVP operational cost | Low | Medium | Medium/high |
 | Fit as authoritative User API | **Best** | Conditional | Not preferred |
 
-Decision: REST/OpenAPI is the authoritative Stage 1 contract. Introduce gRPC
+Decision: REST/OpenAPI is the authoritative contract. Introduce gRPC
 only after measurements show a latency-sensitive or high-volume internal call,
 using versioned protobuf contracts and REST compatibility where required.
 GraphQL belongs in a future BFF/API aggregation layer for frontend composition.
@@ -266,7 +266,7 @@ The MVP will not operate all three protocols.
 11. Deactivation/privacy workflow and events.
 12. Full test suite, Dockerfile, and Compose integration.
 
-## 11. Known gaps (Stage 1)
+## 11. Known gaps )
 
 - **No privacy-request cancellation endpoint.** `POST /me/privacy-requests`
   and `GET /me/privacy-requests/{request_id}` exist, but there is no way to

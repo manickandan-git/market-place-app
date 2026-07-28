@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -214,18 +214,18 @@ class TemplateService:
 
         except Exception as exc:
             raise TemplateRenderingError(
-                (
+                
                     f"Unable to render template "
                     f"'{normalized_name}': {exc}"
-                )
+                
             ) from exc
 
         if not body_html and not body_text:
             raise TemplateRenderingError(
-                (
+                
                     f"Template '{normalized_name}' produced "
                     "no email content"
-                )
+                
             )
 
         rendered_subject = (
@@ -428,10 +428,10 @@ class TemplateService:
             and not replace_existing
         ):
             raise TemplateServiceError(
-                (
+                
                     f"Template '{normalized_name}' "
                     "is already registered"
-                )
+                
             )
 
         if (
@@ -529,7 +529,7 @@ class TemplateService:
 
         context.setdefault(
             "current_year",
-            datetime.now(timezone.utc).year,
+            datetime.now(UTC).year,
         )
 
         context.setdefault("recipient_email", "")

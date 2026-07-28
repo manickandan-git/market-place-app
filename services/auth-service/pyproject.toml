@@ -1,8 +1,8 @@
 [project]
 name = "marketplace-auth-service"
 version = "0.2.0"
-description = "Stage 1 auth service for a marketplace platform"
-requires-python = ">=3.11"
+description = "auth service for a marketplace platform"
+requires-python = ">=3.13"
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
@@ -26,18 +26,23 @@ dependencies = [
 dev = [
   "pytest>=8.2.0",
   "pytest-asyncio>=0.23.0",
-  "ruff>=0.5.0",
+  "ruff>=0.12.0",
   "mypy>=1.10.0",
 ]
 
 [tool.ruff]
 line-length = 100
+target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 ignore_missing_imports = true
 
 [tool.uv]

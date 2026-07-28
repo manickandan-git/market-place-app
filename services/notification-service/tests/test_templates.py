@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -11,7 +11,6 @@ from app.template_service import (
     TemplateService,
     UnknownTemplateError,
 )
-
 
 TEMPLATE_DIRECTORY = (
     Path(__file__).resolve().parents[1]
@@ -77,7 +76,7 @@ def password_changed_template_data() -> dict[str, object]:
             26,
             14,
             30,
-            tzinfo=timezone.utc,
+            tzinfo=UTC,
         ).isoformat(),
         "ip_address": "127.0.0.1",
         "user_agent": "pytest-test-client",
@@ -323,7 +322,7 @@ def test_render_password_changed_email_helper(
         26,
         14,
         30,
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
 
     rendered = template_service.render_password_changed_email(

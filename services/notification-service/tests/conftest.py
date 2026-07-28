@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncGenerator, Generator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -43,7 +43,6 @@ from app.providers.base import (
     ProviderResult,
     RetryableProviderError,
 )
-
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -109,7 +108,7 @@ class MockEmailProvider(EmailProvider):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def clear_settings_cache() -> Generator[None, None, None]:
+def clear_settings_cache() -> Generator[None]:
     """
     Ensure each test session reads the test environment configuration.
     """
@@ -122,7 +121,7 @@ def clear_settings_cache() -> Generator[None, None, None]:
 
 
 @pytest_asyncio.fixture(scope="session")
-async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
+async def test_engine() -> AsyncGenerator[AsyncEngine]:
     """
     Create a shared in-memory SQLite engine for integration tests.
 
@@ -153,7 +152,7 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
 @pytest_asyncio.fixture
 async def db_session(
     test_engine: AsyncEngine,
-) -> AsyncGenerator[AsyncSession, None]:
+) -> AsyncGenerator[AsyncSession]:
     """
     Provide an isolated asynchronous database session.
 
@@ -201,10 +200,7 @@ def test_app(
 
     application = create_application()
 
-    async def override_get_db() -> AsyncGenerator[
-        AsyncSession,
-        None,
-    ]:
+    async def override_get_db() -> AsyncGenerator[AsyncSession]:
         yield db_session
 
     application.dependency_overrides[get_db] = override_get_db
@@ -215,7 +211,7 @@ def test_app(
 @pytest_asyncio.fixture
 async def client(
     test_app: FastAPI,
-) -> AsyncGenerator[AsyncClient, None]:
+) -> AsyncGenerator[AsyncClient]:
     """
     Provide an asynchronous HTTP client for API integration tests.
     """
@@ -314,7 +310,7 @@ def password_changed_email_payload() -> dict[str, Any]:
         },
         "first_name": "Customer",
         "changed_at": datetime.now(
-            timezone.utc
+            UTC
         ).isoformat(),
         "ip_address": "127.0.0.1",
         "user_agent": "pytest-test-client",
@@ -422,7 +418,7 @@ async def failed_notification(
         retry_count=1,
         max_retry_count=3,
         error_message="Simulated provider failure",
-        failed_at=datetime.now(timezone.utc),
+        failed_at=datetime.now(UTC),
         external_reference="failed-test-123",
         is_deleted=False,
     )
@@ -462,7 +458,7 @@ async def sent_notification(
         retry_count=0,
         max_retry_count=3,
         provider_message_id=f"mock-{uuid4()}",
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
         external_reference="sent-test-123",
         is_deleted=False,
     )

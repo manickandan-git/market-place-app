@@ -21,7 +21,6 @@ from app.models import (
     ProviderType,
 )
 
-
 # ============================================================
 # Shared schemas
 # ============================================================
@@ -407,7 +406,7 @@ class DirectEmailRequest(BaseNotificationRequest):
         return normalized
 
     @model_validator(mode="after")
-    def validate_email_body(self) -> "DirectEmailRequest":
+    def validate_email_body(self) -> DirectEmailRequest:
         if not self.body_html and not self.body_text:
             raise ValueError(
                 "At least one of body_html or body_text must be provided"

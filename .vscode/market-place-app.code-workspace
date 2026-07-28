@@ -8,10 +8,20 @@
 		},
 		{
 			"path": "../services/user-service"
+		},
+		{
+			"path": "../services/product-service"
 		}
 	],
 	"settings": {
 	    "python.analysis.autoImportCompletions": true,
-	    "python.terminal.activateEnvironment": true
+	    "python.terminal.activateEnvironment": true,
+	    "files.exclude": {
+	        "**/.venv": true,
+	        "**/__pycache__": true,
+	        "**/.pytest_cache": true,
+	        "**/.ruff_cache": true,
+	        "**/.env": true
+	    }
     }
 }

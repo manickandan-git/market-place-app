@@ -5,12 +5,12 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Enum,
     ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
     func,
@@ -20,7 +20,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
-
 JSON_PAYLOAD_TYPE = JSON().with_variant(JSONB, "postgresql")
 
 
@@ -28,7 +27,7 @@ JSON_PAYLOAD_TYPE = JSON().with_variant(JSONB, "postgresql")
 # Enumerations
 # ==========================================================
 
-class NotificationType(str, enum.Enum):
+class NotificationType(enum.StrEnum):
     EMAIL = "EMAIL"
     SMS = "SMS"
     PUSH = "PUSH"
@@ -36,7 +35,7 @@ class NotificationType(str, enum.Enum):
     TEAMS = "TEAMS"
 
 
-class NotificationStatus(str, enum.Enum):
+class NotificationStatus(enum.StrEnum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
     SENT = "SENT"
@@ -45,14 +44,14 @@ class NotificationStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
 
 
-class NotificationPriority(str, enum.Enum):
+class NotificationPriority(enum.StrEnum):
     LOW = "LOW"
     NORMAL = "NORMAL"
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
 
 
-class ProviderType(str, enum.Enum):
+class ProviderType(enum.StrEnum):
     CONSOLE = "CONSOLE"
     SMTP = "SMTP"
     SENDGRID = "SENDGRID"
@@ -188,7 +187,7 @@ class Notification(Base):
         onupdate=func.now(),
     )
 
-    attempts: Mapped[list["NotificationAttempt"]] = relationship(
+    attempts: Mapped[list[NotificationAttempt]] = relationship(
         back_populates="notification",
         cascade="all, delete-orphan",
         order_by="NotificationAttempt.attempt_number",

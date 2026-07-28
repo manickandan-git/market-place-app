@@ -14,7 +14,6 @@ from app.models import (
     NotificationStatus,
 )
 
-
 pytestmark = pytest.mark.asyncio
 
 

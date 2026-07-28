@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import AsyncIterator
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -144,7 +144,7 @@ def register_service_routes(
             status="healthy",
             service=settings.app_name,
             version=settings.app_version,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     @application.get(
@@ -217,7 +217,7 @@ def register_service_routes(
             ),
             service=settings.app_name,
             version=settings.app_version,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             dependencies=dependencies,
         )
 

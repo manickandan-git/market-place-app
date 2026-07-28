@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -438,7 +438,7 @@ class EmailService:
             and scheduled_at.tzinfo is None
         ):
             scheduled_at = scheduled_at.replace(
-                tzinfo=timezone.utc
+                tzinfo=UTC
             )
 
         if (
@@ -779,7 +779,7 @@ class EmailService:
                 setattr(
                     notification,
                     field_name,
-                    value.replace(tzinfo=timezone.utc),
+                    value.replace(tzinfo=UTC),
                 )
 
         return notification
@@ -1003,7 +1003,7 @@ class EmailService:
 
     @staticmethod
     def _utc_now() -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     @staticmethod
     def _elapsed_ms(started_at: float) -> int:

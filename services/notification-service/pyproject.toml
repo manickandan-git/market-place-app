@@ -133,7 +133,7 @@ packages = ["app"]
 ############################################################
 
 [tool.ruff]
-line-length = 88
+line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
@@ -143,18 +143,22 @@ select = [
     "I",
     "UP",
     "B",
+    "ASYNC",
 ]
 
 ignore = [
     "B008",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]
+
 ############################################################
 # Black
 ############################################################
 
 [tool.black]
-line-length = 88
+line-length = 100
 target-version = ["py313"]
 
 ############################################################

@@ -3,8 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import EmailStr, Field
-from pydantic import model_validator
+from pydantic import EmailStr, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -241,7 +240,7 @@ class Settings(BaseSettings):
         )
 
     @model_validator(mode="after")
-    def validate_smtp_settings(self) -> "Settings":
+    def validate_smtp_settings(self) -> Settings:
         if self.smtp_use_tls and self.smtp_use_ssl:
             raise ValueError(
                 "SMTP_USE_TLS and SMTP_USE_SSL cannot both be true."

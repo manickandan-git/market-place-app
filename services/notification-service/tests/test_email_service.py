@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -105,7 +105,7 @@ async def test_create_scheduled_direct_notification(
         mock_email_provider,
     )
 
-    scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
+    scheduled_at = datetime.now(UTC) + timedelta(hours=2)
 
     notification = await service.create_direct_notification(
         recipient_email="customer@example.com",
@@ -228,7 +228,7 @@ async def test_create_password_changed_email(
         mock_email_provider,
     )
 
-    changed_at = datetime.now(timezone.utc)
+    changed_at = datetime.now(UTC)
 
     notification = await service.create_password_changed_email(
         recipient_email="customer@example.com",
@@ -584,7 +584,7 @@ async def test_send_future_scheduled_notification_is_rejected(
     pending_notification: Notification,
 ) -> None:
     pending_notification.scheduled_at = (
-        datetime.now(timezone.utc) + timedelta(hours=1)
+        datetime.now(UTC) + timedelta(hours=1)
     )
     await db_session.flush()
 

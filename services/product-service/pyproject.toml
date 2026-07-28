@@ -1,0 +1,41 @@
+[project]
+name = "marketplace-product-service"
+version = "1.0.0"
+description = "Marketplace product catalog microservice"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.16.0,<2",
+    "asyncpg>=0.30.0,<1",
+    "fastapi>=0.116.0,<1",
+    "httpx>=0.28.0,<1",
+    "pydantic-settings>=2.10.0,<3",
+    "pyjwt[crypto]>=2.10.0,<3",
+    "python-multipart>=0.0.20,<1",
+    "sqlalchemy[asyncio]>=2.0.41,<3",
+    "uvicorn[standard]>=0.35.0,<1",
+]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.21.0,<1",
+    "pytest>=8.4.0,<9",
+    "pytest-asyncio>=1.0.0,<2",
+    "ruff>=0.12.0,<1",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]
