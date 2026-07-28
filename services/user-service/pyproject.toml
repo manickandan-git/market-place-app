@@ -1,0 +1,48 @@
+[project]
+name = "user-service"
+version = "0.1.0"
+description = "Marketplace buyer, seller, address, and preference service"
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.16,<2",
+    "asyncpg>=0.30,<1",
+    "email-validator>=2.2,<3",
+    "fastapi>=0.116,<1",
+    "pydantic-settings>=2.10,<3",
+    "pyjwt[crypto]>=2.10,<3",
+    "sqlalchemy[asyncio]>=2.0.41,<3",
+    "tzdata>=2025.2",
+    "uvicorn[standard]>=0.35,<1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.9,<3",
+    "aiosqlite>=0.21,<1",
+    "pytest>=8.4,<9",
+    "pytest-asyncio>=1.0,<2",
+    "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]
