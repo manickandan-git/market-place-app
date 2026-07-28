@@ -266,3 +266,21 @@ The MVP will not operate all three protocols.
 11. Deactivation/privacy workflow and events.
 12. Full test suite, Dockerfile, and Compose integration.
 
+## 11. Known gaps (Stage 1)
+
+- **No privacy-request cancellation endpoint.** `POST /me/privacy-requests`
+  and `GET /me/privacy-requests/{request_id}` exist, but there is no way to
+  transition a request out of `pending`/`in_progress` (`PrivacyRequestStatus`
+  defines `CANCELLED`, but nothing in the API can set it). This is a dead end
+  in practice: `reactivate()` refuses while the profile is
+  `deletion_pending`, and `uq_active_privacy_request_per_type` blocks
+  submitting another request of the same type while one is active — so a
+  buyer who requests deletion cannot reactivate, re-request, or cancel.
+  Implementing this requires deciding (a) the endpoint shape (e.g. `POST
+  /me/privacy-requests/{request_id}/cancel`), (b) whether cancelling a
+  deletion request reverts the buyer profile back to `active`, and (c)
+  setting `resolved_at` to satisfy
+  `ck_privacy_requests_resolution_timestamp_matches_status`, which requires a
+  non-null `resolved_at` whenever status is `completed`/`rejected`/
+  `cancelled`.
+

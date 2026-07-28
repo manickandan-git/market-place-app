@@ -16,9 +16,11 @@ class ProfileStatus(StrEnum):
 
 
 class SellerStatus(StrEnum):
-    PENDING = "pending"
+    DRAFT = "draft"
+    PENDING_REVIEW = "pending_review"
     ACTIVE = "active"
     SUSPENDED = "suspended"
+    CLOSED = "closed"
 
 
 class BuyerProfile(UUIDTimestampVersionMixin, Base):
@@ -31,7 +33,12 @@ class BuyerProfile(UUIDTimestampVersionMixin, Base):
     phone_number: Mapped[str | None] = mapped_column(String(32))
     profile_image_reference: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[ProfileStatus] = mapped_column(
-        Enum(ProfileStatus, name="profile_status", values_callable=lambda e: [x.value for x in e]),
+        Enum(
+            ProfileStatus,
+            name="profile_status",
+            native_enum=False,
+            values_callable=lambda e: [x.value for x in e],
+        ),
         default=ProfileStatus.ACTIVE,
     )
     deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -57,8 +64,13 @@ class SellerProfile(UUIDTimestampVersionMixin, Base):
     support_email: Mapped[str | None] = mapped_column(String(320))
     support_phone: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[SellerStatus] = mapped_column(
-        Enum(SellerStatus, name="seller_status", values_callable=lambda e: [x.value for x in e]),
-        default=SellerStatus.PENDING,
+        Enum(
+            SellerStatus,
+            name="seller_status",
+            native_enum=False,
+            values_callable=lambda e: [x.value for x in e],
+        ),
+        default=SellerStatus.PENDING_REVIEW,
     )
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

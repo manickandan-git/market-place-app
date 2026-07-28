@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../services/auth-service"
+		},
+		{
+			"path": "../services/user-service"
 		}
 	],
 	"settings": {

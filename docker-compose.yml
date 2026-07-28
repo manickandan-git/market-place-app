@@ -6,13 +6,13 @@ services:
     environment:
       - POSTGRES_USER=marketplace
       - POSTGRES_PASSWORD=marketplace
-      - POSTGRES_DB=marketplace_auth
+      - POSTGRES_DB=auth_service
     ports:
       - "5433:5432"                
     volumes:
       -  marketplace_auth_service_postgres_data:/var/lib/postgresql/data # Keeps your data safe when container stops
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U marketplace -d marketplace_auth"]
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d auth_service"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -27,7 +27,7 @@ services:
     environment:
       - NODE_ENV=development
       # CRUCIAL: Use the service name "auth-db" as the hostname, NOT "localhost"
-      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-auth-db:5432/marketplace_auth
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-auth-db:5432/auth_service
       - REDIS_URL=redis://marketplace-auth-redis:6379/0
       - NOTIFICATION_SERVICE_URL=http://marketplace-notification-service:8002
       - NOTIFICATION_SERVICE_API_KEY=f9fbc3c5dfa3b56d5b0f941f957761894191f287639a772576e450a460a52ec6
@@ -65,13 +65,13 @@ services:
     environment:
       - POSTGRES_USER=marketplace
       - POSTGRES_PASSWORD=marketplace
-      - POSTGRES_DB=marketplace_notifications
+      - POSTGRES_DB=notification_service
     ports:
       - "5434:5432"
     volumes:
       - marketplace_notification_service_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U marketplace -d marketplace_notifications"]
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d notification_service"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -92,7 +92,7 @@ services:
       - "8002:8002"
     environment:
       - APP_ENV=development
-      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-notification-db:5432/marketplace_notifications
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-notification-db:5432/notification_service
       - REDIS_URL=redis://marketplace-notification-redis:6379/1
       - CELERY_BROKER_URL=redis://marketplace-notification-redis:6379/1
       - CELERY_RESULT_BACKEND=redis://marketplace-notification-redis:6379/2
@@ -108,14 +108,66 @@ services:
       marketplace-notification-redis:
         condition: service_started
 
-  # 8. The Notification Worker (Celery)
+  # 8. The User Service Database
+  marketplace-user-db:
+    image: postgres:16-alpine
+    container_name: marketplace-user-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=user_service
+    ports:
+      - "5435:5432"
+    volumes:
+      - marketplace_user_service_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d user_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 9. The User Service (API)
+  marketplace-user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - USER_SERVICE_ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-user-db:5432/user_service
+      - USER_SERVICE_DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-user-db:5432/user_service
+      # iss is a literal string compared against the access token's "iss"
+      # claim, which auth-service bakes in from its own JWT_ISSUER setting
+      # (http://localhost:8001) — this must match that value exactly and is
+      # NOT a network address, unlike IDENTITY_JWKS_URL below.
+      - USER_SERVICE_IDENTITY_ISSUER=http://localhost:8001
+      - USER_SERVICE_IDENTITY_AUDIENCE=marketplace-api
+      - USER_SERVICE_IDENTITY_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      - USER_SERVICE_CORS_ORIGINS=["http://localhost:3000"]
+      - USER_SERVICE_DOCS_ENABLED=true
+    volumes:
+      # Only source dirs are mounted (not the whole service directory): the
+      # image's dependencies are a uv-managed .venv baked in at build time,
+      # and bind-mounting the full directory would shadow it with the host's
+      # own (Windows) .venv and break the container.
+      - ./services/user-service/app:/app/app
+      - ./services/user-service/alembic:/app/alembic
+    command: sh -c "uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload"
+    depends_on:
+      marketplace-user-db:
+        condition: service_healthy
+      marketplace-auth-service:
+        condition: service_started
+
+  # 10. The Notification Worker (Celery)
   marketplace-notification-worker:
     build:
       context: ./services/notification-service
       dockerfile: Dockerfile
     environment:
       - APP_ENV=development
-      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-notification-db:5432/marketplace_notifications
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-notification-db:5432/notification_service
       - REDIS_URL=redis://marketplace-notification-redis:6379/1
       - CELERY_BROKER_URL=redis://marketplace-notification-redis:6379/1
       - CELERY_RESULT_BACKEND=redis://marketplace-notification-redis:6379/2
@@ -135,3 +187,4 @@ services:
 volumes:
   marketplace_auth_service_postgres_data:
   marketplace_notification_service_postgres_data:
+  marketplace_user_service_postgres_data:

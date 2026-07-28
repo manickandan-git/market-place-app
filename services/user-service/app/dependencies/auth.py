@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import lru_cache
 from uuid import UUID
 
 import jwt
@@ -10,6 +11,13 @@ from jwt import PyJWKClient
 from app.config import Settings, get_settings
 
 bearer = HTTPBearer(auto_error=False)
+
+
+@lru_cache
+def _get_jwks_client(jwks_url: str) -> PyJWKClient:
+    # PyJWKClient caches fetched keys internally; caching the client itself
+    # (keyed by URL) avoids re-fetching the JWKS document on every request.
+    return PyJWKClient(jwks_url)
 
 
 @dataclass(frozen=True)
@@ -40,7 +48,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required"
         )
     try:
-        jwks_client = PyJWKClient(settings.identity_jwks_url)
+        jwks_client = _get_jwks_client(settings.identity_jwks_url)
         signing_key = await to_thread.run_sync(
             jwks_client.get_signing_key_from_jwt,
             credentials.credentials,

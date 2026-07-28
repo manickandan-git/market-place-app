@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
+from app.keys import get_signing_keys
 from app.models import User
 
 settings = get_settings()
@@ -46,8 +47,10 @@ async def get_current_user(
     try:
         payload = jwt.decode(
             token,
-            settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm],
+            get_signing_keys().public_pem,
+            algorithms=[settings.jwt_access_algorithm],
+            audience=settings.jwt_audience,
+            issuer=settings.jwt_issuer,
         )
 
         subject = payload.get("sub")

@@ -1,5 +1,6 @@
 # .gitignore
 **/.env
+services/auth-service/keys/*.pem
 
 .venv/
 __pycache__/

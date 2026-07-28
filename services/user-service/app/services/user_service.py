@@ -11,6 +11,7 @@ from app.config import Settings
 from app.exceptions import ConflictError, NotFoundError, StaleVersionError
 from app.models import (
     Address,
+    AuditActorType,
     AuditLog,
     BuyerProfile,
     ConsentSource,
@@ -70,7 +71,7 @@ class UserService:
         await self.session.flush()
         self.session.add(UserPreference(buyer_profile_id=profile.id))
         self._audit(
-            user_id, "profile.created", "buyer_profile", profile.id, None, payload.model_dump()
+            user_id, "created", "buyer_profile", profile.id, None, payload.model_dump()
         )
         self._event(profile.id, "user.profile.created.v1", {"user_id": str(user_id)})
         await self.session.commit()
@@ -92,7 +93,7 @@ class UserService:
         profile.version += 1
         self._audit(
             user_id,
-            "profile.updated",
+            "updated",
             "buyer_profile",
             profile.id,
             before,
@@ -111,11 +112,13 @@ class UserService:
         profile = await self.require_profile(user_id)
         if profile.seller_profile:
             raise ConflictError("Seller profile already exists")
+        if await self.repo.seller_by_store_slug(payload.store_slug):
+            raise ConflictError("Store slug is already taken")
         seller = SellerProfile(buyer_profile_id=profile.id, **payload.model_dump(mode="json"))
         self.session.add(seller)
         await self.session.flush()
         self._audit(
-            user_id, "seller.created", "seller_profile", seller.id, None, payload.model_dump()
+            user_id, "created", "seller_profile", seller.id, None, payload.model_dump()
         )
         self._event(seller.id, "user.seller_profile.created.v1", {"user_id": str(user_id)})
         await self.session.commit()
@@ -130,13 +133,17 @@ class UserService:
         if not seller:
             raise NotFoundError("Seller profile does not exist")
         self._check_version(seller.version, version)
+        if payload.store_slug and payload.store_slug != seller.store_slug:
+            existing = await self.repo.seller_by_store_slug(payload.store_slug)
+            if existing and existing.id != seller.id:
+                raise ConflictError("Store slug is already taken")
         before = {key: getattr(seller, key) for key in payload.model_fields_set}
         for key, value in payload.model_dump(exclude_unset=True, mode="json").items():
             setattr(seller, key, value)
         seller.version += 1
         self._audit(
             user_id,
-            "seller.updated",
+            "updated",
             "seller_profile",
             seller.id,
             before,
@@ -162,7 +169,7 @@ class UserService:
         address = Address(buyer_profile_id=profile.id, **request_data)
         self.session.add(address)
         await self.session.flush()
-        self._audit(user_id, "address.created", "address", address.id, None, request_data)
+        self._audit(user_id, "created", "address", address.id, None, request_data)
         self._event(
             address.id,
             "user.address.created.v1",
@@ -190,7 +197,7 @@ class UserService:
         for key, value in values.items():
             setattr(address, key, value)
         address.version += 1
-        self._audit(user_id, "address.updated", "address", address.id, before, values)
+        self._audit(user_id, "updated", "address", address.id, before, values)
         self._event(address.id, "user.address.updated.v1", {"user_id": str(user_id)})
         await self.session.commit()
         await self.session.refresh(address)
@@ -205,7 +212,7 @@ class UserService:
         address.deleted_at = datetime.now(UTC)
         address.is_default = False
         address.version += 1
-        self._audit(user_id, "address.deleted", "address", address.id, None, None)
+        self._audit(user_id, "deleted", "address", address.id, None, None)
         self._event(address.id, "user.address.deleted.v1", {"user_id": str(user_id)})
         await self.session.commit()
 
@@ -224,7 +231,7 @@ class UserService:
         preference.version += 1
         self._audit(
             user_id,
-            "preferences.updated",
+            "updated",
             "user_preference",
             preference.id,
             None,
@@ -252,7 +259,7 @@ class UserService:
                 self.session.add(
                     NotificationPreference(buyer_profile_id=profile.id, **item.model_dump())
                 )
-        self._audit(user_id, "notifications.updated", "buyer_profile", profile.id, None, None)
+        self._audit(user_id, "updated", "buyer_profile", profile.id, None, None)
         await self.session.commit()
         return await self.repo.notification_preferences(profile.id)
 
@@ -273,7 +280,7 @@ class UserService:
                 self.session.add(
                     UserConsent(buyer_profile_id=profile.id, source=source, **item.model_dump())
                 )
-        self._audit(user_id, "consents.updated", "buyer_profile", profile.id, None, None)
+        self._audit(user_id, "consent_changed", "buyer_profile", profile.id, None, None)
         await self.session.commit()
         return await self.repo.consents(profile.id)
 
@@ -298,7 +305,7 @@ class UserService:
             profile.status = ProfileStatus.DELETION_PENDING
             profile.version += 1
         await self.session.flush()
-        self._audit(user_id, "privacy.requested", "privacy_request", record.id, None, data)
+        self._audit(user_id, "privacy_requested", "privacy_request", record.id, None, data)
         self._event(
             record.id,
             "user.privacy_requested.v1",
@@ -317,7 +324,7 @@ class UserService:
         profile.status = ProfileStatus.DEACTIVATED
         profile.deactivated_at = datetime.now(UTC)
         profile.version += 1
-        self._audit(user_id, "profile.deactivated", "buyer_profile", profile.id, None, None)
+        self._audit(user_id, "deactivated", "buyer_profile", profile.id, None, None)
         self._event(profile.id, "user.profile.deactivated.v1", {"user_id": str(user_id)})
         await self.session.commit()
         return profile
@@ -329,7 +336,7 @@ class UserService:
         profile.status = ProfileStatus.ACTIVE
         profile.deactivated_at = None
         profile.version += 1
-        self._audit(user_id, "profile.reactivated", "buyer_profile", profile.id, None, None)
+        self._audit(user_id, "reactivated", "buyer_profile", profile.id, None, None)
         self._event(profile.id, "user.profile.reactivated.v1", {"user_id": str(user_id)})
         await self.session.commit()
         return profile
@@ -351,6 +358,7 @@ class UserService:
     ) -> None:
         self.session.add(
             AuditLog(
+                actor_type=AuditActorType.USER,
                 actor_id=user_id,
                 subject_user_id=user_id,
                 action=action,

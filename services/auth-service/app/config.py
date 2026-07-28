@@ -26,9 +26,18 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6380/0"
 
-    # JWT
+    # JWT — refresh tokens only (auth-service is the sole consumer, so a
+    # shared HMAC secret is fine here)
     jwt_secret_key: str = "change-this-in-production"
     jwt_algorithm: str = "HS256"
+
+    # JWT — access tokens, verified by other services via JWKS
+    jwt_access_algorithm: str = "RS256"
+    jwt_private_key_path: str = "keys/jwt_private_key.pem"
+    jwt_public_key_path: str = "keys/jwt_public_key.pem"
+    jwt_kid: str = "auth-key-1"
+    jwt_issuer: str = "http://localhost:8001"
+    jwt_audience: str = "marketplace-api"
 
     # Token expiration
     access_token_expire_minutes: int = 15

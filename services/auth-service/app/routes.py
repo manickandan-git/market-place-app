@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.datetime_utils import as_utc, utc_now
 from app.dependencies import CurrentUser
+from app.keys import get_signing_keys
 from app.models import (
     PasswordResetToken,
     RefreshToken,
@@ -105,23 +106,31 @@ def create_access_token(user: User) -> str:
         minutes=settings.access_token_expire_minutes,
     )
 
+    role_value = (
+        user.role.value
+        if hasattr(user.role, "value")
+        else str(user.role)
+    )
+
     payload: dict[str, Any] = {
         "sub": str(user.id),
         "email": user.email,
-        "role": (
-            user.role.value
-            if hasattr(user.role, "value")
-            else str(user.role)
-        ),
+        "role": role_value,
+        # Consumers (e.g. user-service) authorize off this claim.
+        "roles": [role_value.lower()],
         "type": "access",
+        "iss": settings.jwt_issuer,
+        "aud": settings.jwt_audience,
         "iat": now,
         "exp": expiration,
     }
 
+    keys = get_signing_keys()
     return jwt.encode(
         payload,
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
+        keys.private_pem,
+        algorithm=settings.jwt_access_algorithm,
+        headers={"kid": keys.kid},
     )
 
 

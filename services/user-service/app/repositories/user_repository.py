@@ -31,6 +31,12 @@ class UserRepository:
     async def public_seller(self, seller_id: UUID) -> SellerProfile | None:
         return await self.session.get(SellerProfile, seller_id)
 
+    async def seller_by_store_slug(self, store_slug: str) -> SellerProfile | None:
+        result = await self.session.execute(
+            select(SellerProfile).where(SellerProfile.store_slug == store_slug)
+        )
+        return result.scalar_one_or_none()
+
     async def addresses(
         self, profile_id: UUID, address_type: AddressType | None = None
     ) -> list[Address]:

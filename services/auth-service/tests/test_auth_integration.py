@@ -271,6 +271,9 @@ async def test_access_token_cannot_be_used_as_refresh_token(
     client: AsyncClient,
     authenticated_buyer: dict,
 ) -> None:
+    # Access tokens (RS256) and refresh tokens (HS256) are signed with
+    # different keys/algorithms, so an access token fails to decode at all
+    # here rather than decoding and then failing the "type" claim check.
     response = await client.post(
         "/api/v1/auth/refresh",
         json={
@@ -280,7 +283,7 @@ async def test_access_token_cannot_be_used_as_refresh_token(
 
     assert response.status_code == 401
     assert response.json()["detail"] == (
-        "A refresh token is required"
+        "Invalid or expired token"
     )
 
 

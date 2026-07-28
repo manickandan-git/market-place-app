@@ -15,9 +15,10 @@ class NotificationChannel(StrEnum):
 
 
 class NotificationCategory(StrEnum):
-    ACCOUNT = "account"
-    ORDERS = "orders"
-    PROMOTIONS = "promotions"
+    TRANSACTIONAL = "transactional"
+    SECURITY = "security"
+    MARKETING = "marketing"
+    PRODUCT_UPDATES = "product_updates"
 
 
 class UserPreference(UUIDTimestampVersionMixin, Base):
@@ -48,6 +49,7 @@ class NotificationPreference(UUIDTimestampVersionMixin, Base):
         Enum(
             NotificationChannel,
             name="notification_channel",
+            native_enum=False,
             values_callable=lambda e: [x.value for x in e],
         )
     )
@@ -55,6 +57,7 @@ class NotificationPreference(UUIDTimestampVersionMixin, Base):
         Enum(
             NotificationCategory,
             name="notification_category",
+            native_enum=False,
             values_callable=lambda e: [x.value for x in e],
         )
     )

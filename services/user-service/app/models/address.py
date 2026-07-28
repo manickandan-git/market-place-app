@@ -30,7 +30,12 @@ class Address(UUIDTimestampVersionMixin, Base):
         PGUUID(as_uuid=True), ForeignKey("buyer_profiles.id", ondelete="CASCADE"), index=True
     )
     address_type: Mapped[AddressType] = mapped_column(
-        Enum(AddressType, name="address_type", values_callable=lambda e: [x.value for x in e])
+        Enum(
+            AddressType,
+            name="address_type",
+            native_enum=False,
+            values_callable=lambda e: [x.value for x in e],
+        )
     )
     label: Mapped[str | None] = mapped_column(String(50))
     recipient_name: Mapped[str] = mapped_column(String(200))

@@ -31,12 +31,22 @@ class UserConsent(UUIDTimestampVersionMixin, Base):
         PGUUID(as_uuid=True), ForeignKey("buyer_profiles.id", ondelete="CASCADE"), index=True
     )
     consent_type: Mapped[ConsentType] = mapped_column(
-        Enum(ConsentType, name="consent_type", values_callable=lambda e: [x.value for x in e])
+        Enum(
+            ConsentType,
+            name="consent_type",
+            native_enum=False,
+            values_callable=lambda e: [x.value for x in e],
+        )
     )
     is_granted: Mapped[bool] = mapped_column(Boolean, default=False)
     policy_version: Mapped[str] = mapped_column(String(50))
     source: Mapped[ConsentSource] = mapped_column(
-        Enum(ConsentSource, name="consent_source", values_callable=lambda e: [x.value for x in e])
+        Enum(
+            ConsentSource,
+            name="consent_source",
+            native_enum=False,
+            values_callable=lambda e: [x.value for x in e],
+        )
     )
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     policy_reference: Mapped[str | None] = mapped_column(String(512))

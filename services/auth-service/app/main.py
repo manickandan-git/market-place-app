@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from app.config import get_settings
 from app.database import engine
+from app.jwks import router as jwks_router
 from app.routes import router as auth_router
 from app.session_routes import router as session_router
 from app.user_routes import router as user_router
@@ -121,6 +122,10 @@ async def readiness_check() -> dict[str, str]:
 # ============================================================
 # API routers
 # ============================================================
+
+# Mounted at the app root, not under api_v1_prefix — JWKS/OIDC discovery
+# URLs are conventionally unprefixed so other services can hardcode them.
+app.include_router(jwks_router)
 
 app.include_router(
     auth_router,

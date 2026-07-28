@@ -1,5 +1,5 @@
 from app.models.address import Address, AddressType
-from app.models.audit import AuditLog, AuditOutcome
+from app.models.audit import AuditActorType, AuditLog, AuditOutcome
 from app.models.base import Base
 from app.models.consent import ConsentSource, ConsentType, UserConsent
 from app.models.preferences import (
@@ -15,6 +15,7 @@ from app.models.reliability import IdempotencyRecord, OutboxEvent
 __all__ = [
     "Address",
     "AddressType",
+    "AuditActorType",
     "AuditLog",
     "AuditOutcome",
     "Base",

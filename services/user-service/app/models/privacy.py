@@ -43,6 +43,7 @@ class PrivacyRequest(UUIDTimestampVersionMixin, Base):
         Enum(
             PrivacyRequestType,
             name="privacy_request_type",
+            native_enum=False,
             values_callable=lambda e: [x.value for x in e],
         )
     )
@@ -50,6 +51,7 @@ class PrivacyRequest(UUIDTimestampVersionMixin, Base):
         Enum(
             PrivacyRequestStatus,
             name="privacy_request_status",
+            native_enum=False,
             values_callable=lambda e: [x.value for x in e],
         ),
         default=PrivacyRequestStatus.PENDING,
