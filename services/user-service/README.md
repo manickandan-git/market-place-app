@@ -45,13 +45,16 @@ user-service/
 │   ├── database.py
 │   ├── exceptions.py
 │   └── main.py
-├── docs/stage-1-scope.md
+├── docs/scope.md
 ├── tests/
 ├── .env.example
 ├── Dockerfile
-├── docker-compose.yml
 └── pyproject.toml
 ```
+
+Docker Compose for this service lives at the monorepo root
+(`../../docker-compose.yml`), alongside the compose definitions for
+auth-service, notification-service, and product-service.
 
 ## Prerequisites
 
@@ -97,16 +100,20 @@ Open:
 
 ## Option B — Docker Compose
 
-The compose file starts PostgreSQL, runs Alembic, and starts User Service:
+There is no compose file inside this directory; the monorepo root
+(`market-place-app/docker-compose.yml`) defines every service, including this
+one's dedicated Postgres (`marketplace-user-db`). Run from the repo root:
 
 ```powershell
-docker compose up --build
+cd ..\..
+docker compose up --build marketplace-user-db marketplace-user-service
 ```
 
-The API is available at `http://localhost:8003`.
+Add `marketplace-auth-db marketplace-auth-service` to the same command if the
+Identity Service also needs to come up, or omit the service names entirely to
+start the whole stack.
 
-The Identity Service is expected on host port `8001`. On Windows/Mac,
-`host.docker.internal` is already configured in `docker-compose.yml`.
+The API is available at `http://localhost:8003`.
 
 Stop:
 
@@ -114,7 +121,7 @@ Stop:
 docker compose down
 ```
 
-Remove the local database volume only when you intentionally want a clean DB:
+Remove the database volumes only when you intentionally want a clean DB:
 
 ```powershell
 docker compose down -v
@@ -172,7 +179,7 @@ Read the profile:
 ```powershell
 Invoke-RestMethod `
   -Method Get `
-  -Uri "http://localhost:8002/api/v1/me" `
+  -Uri "http://localhost:8003/api/v1/me" `
   -Headers $headers
 ```
 
@@ -184,7 +191,7 @@ $addressHeaders["Idempotency-Key"] = [guid]::NewGuid().ToString()
 
 Invoke-RestMethod `
   -Method Post `
-  -Uri "http://localhost:8002/api/v1/me/addresses" `
+  -Uri "http://localhost:8003/api/v1/me/addresses" `
   -Headers $addressHeaders `
   -Body '{
     "address_type":"shipping",
@@ -222,7 +229,8 @@ A stale version returns HTTP `412`. A missing `If-Match` returns HTTP `428`.
 | GET/PUT | `/api/v1/me/consents` | Policy/marketing decisions |
 | POST | `/api/v1/me/deactivation` | Deactivate profile |
 | POST | `/api/v1/me/reactivation` | Reactivate profile |
-| POST/GET | `/api/v1/me/privacy-requests[/{id}]` | Privacy workflow |
+| POST | `/api/v1/me/privacy-requests` | Create export/access/deletion request |
+| GET | `/api/v1/me/privacy-requests/{id}` | Retrieve owned privacy request status |
 
 ## Test and quality commands
 
