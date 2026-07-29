@@ -12,6 +12,7 @@ PostgreSQL database and is independently deployable; the root
 | [notification-service](services/notification-service) | `8002` | Transactional email delivery (verification, password reset/changed, templated/direct), Celery-backed retries | [README](services/notification-service/README.md) |
 | [user-service](services/user-service) | `8003` | Buyer/seller profiles, addresses, preferences, consent, privacy/deactivation workflow | [README](services/user-service/README.md) |
 | [product-service](services/product-service) | `8004` | Seller-owned product catalog, categories, variants/SKUs, public catalog reads | [README](services/product-service/README.md) |
+| [inventory-service](services/inventory-service) | `8005` | Warehouses, seller stock, availability, reservations, movements, low-stock events | [README](services/inventory-service/README.md) |
 
 `auth-service` (a.k.a. the Identity Service) is the sole authority for
 credentials, roles, sessions, and JWT issuance. The other services validate
@@ -21,21 +22,25 @@ Identity-issued JWTs via JWKS and treat the token's immutable `sub` claim as
 ## Architecture
 
 ```text
-                         ┌──────────────────┐
-                         │   auth-service    │  :8001
-                         │  (Identity, JWKS) │
-                         └───────┬───────────┘
-                                 │ validates JWT via JWKS
-              ┌──────────────────┼──────────────────┐
-              │                  │                  │
-   ┌──────────▼───────┐ ┌────────▼─────────┐ ┌──────▼───────────┐
-   │ notification-svc  │ │   user-service    │ │  product-service  │
-   │      :8002        │ │      :8003        │ │      :8004        │
-   └──────────┬────────┘ └───────────────────┘ └───────────────────┘
-              │ Celery worker + Redis
-              ▼
-        email delivery
+                     ┌───────────────────┐
+                     │    auth-service    │  :8001
+                     │  (Identity, JWKS)  │
+                     └──────────┬─────────┘
+                                │ validates JWT via JWKS
+        ┌───────────────┬──────┴──────┬────────────────┐
+        │               │             │                │
+        ▼               ▼             ▼                ▼
+ notification-service  user-service  product-service  inventory-service
+       :8002              :8003          :8004             :8005
+        │                                    │                ▲
+        │ Celery worker + Redis              │ variant/SKU sync via
+        ▼                                    │ PUT /internal/catalog-skus
+  email delivery                             └────────────────┘
 ```
+
+Inventory Service pulls product/variant projections from Product Service
+(`PUT /api/v1/internal/catalog-skus/{variant_id}`) to know which SKUs it can
+stock; it does not share Product Service's database.
 
 Each service has a dedicated Postgres database (and Redis where needed) started
 by the root compose file; there is no cross-service database access. Service
@@ -57,13 +62,14 @@ docker compose up --build
 
 This starts, in dependency order: each service's Postgres database, Redis
 (auth and notification), the notification Celery worker and mailer
-(`mailpit`, profile `dev`), and all four API services. Each API container
+(`mailpit`, profile `dev`), and all five API services. Each API container
 applies its own Alembic migrations on startup.
 
 - auth-service: http://localhost:8001/docs
 - notification-service: http://localhost:8002/docs
 - user-service: http://localhost:8003/docs
 - product-service: http://localhost:8004/docs
+- inventory-service: http://localhost:8005/docs
 - mailpit (dev email capture, `--profile dev`): http://localhost:8025
 
 Start a subset (e.g. just Identity + User):
@@ -97,6 +103,7 @@ the host, use the published ports:
 | notification (`marketplace-notification-db`) | `5434` |
 | user (`marketplace-user-db`) | `5435` |
 | product (`marketplace-product-db`) | `5436` |
+| inventory (`marketplace-inventory-db`) | `5437` |
 
 ## Repository layout
 
@@ -107,6 +114,7 @@ market-place-app/
 │   ├── auth-service/        # Identity: registration, login, tokens, JWKS
 │   ├── notification-service/# Email delivery, Celery worker
 │   ├── user-service/        # Profiles, addresses, preferences, privacy
-│   └── product-service/     # Catalog: categories, products, variants
+│   ├── product-service/     # Catalog: categories, products, variants
+│   └── inventory-service/   # Warehouses, stock, reservations, movements
 └── README.md
 ```
