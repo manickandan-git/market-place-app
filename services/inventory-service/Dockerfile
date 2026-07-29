@@ -9,8 +9,8 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv
 
-COPY pyproject.toml README.md alembic.ini ./
-RUN uv sync --no-dev
+COPY pyproject.toml uv.lock README.md alembic.ini ./
+RUN uv sync --frozen --no-dev
 
 COPY app ./app
 COPY alembic ./alembic

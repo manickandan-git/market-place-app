@@ -10,7 +10,7 @@ test:
 	uv run pytest -q
 
 run:
-	uv run uvicorn app.main:app --reload --port 8004
+	uv run uvicorn app.main:app --reload --port 8005
 
 migrate:
 	uv run alembic upgrade head

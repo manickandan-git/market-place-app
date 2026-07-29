@@ -37,6 +37,9 @@ def _generate_ephemeral_keys(kid: str) -> SigningKeys:
     return SigningKeys(private_pem=private_pem, public_pem=public_pem, kid=kid)
 
 
+_NON_PRODUCTION_ENVS = {"development", "dev", "test", "testing", "local"}
+
+
 @lru_cache
 def get_signing_keys() -> SigningKeys:
     settings = get_settings()
@@ -48,6 +51,15 @@ def get_signing_keys() -> SigningKeys:
             private_pem=private_path.read_text(encoding="ascii"),
             public_pem=public_path.read_text(encoding="ascii"),
             kid=settings.jwt_kid,
+        )
+
+    if settings.app_env.lower() not in _NON_PRODUCTION_ENVS:
+        raise RuntimeError(
+            f"JWT signing keys not found at {private_path} / {public_path}. "
+            "Generate a persisted keypair with scripts/generate_jwt_keypair.py "
+            "and mount it before starting the service outside of "
+            "development/test — falling back to an ephemeral in-memory key "
+            "would break JWKS verification across restarts and replicas."
         )
 
     return _generate_ephemeral_keys(settings.jwt_kid)
