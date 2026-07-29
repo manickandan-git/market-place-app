@@ -2,7 +2,7 @@
 found in user-service this session (OutboxEvent/IdempotencyRecord were
 modeled but absent from the initial migration, only discovered via live
 testing). Every table SQLAlchemy knows about must have a matching
-op.create_table(...) call in the single Stage-1 migration.
+op.create_table(...) call in the single migration.
 """
 
 import re
