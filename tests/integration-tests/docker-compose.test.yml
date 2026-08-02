@@ -1,0 +1,15 @@
+services:
+  integration-tests:
+    image: python:3.13-slim
+    working_dir: /tests
+    volumes:
+      - .:/tests
+    env_file:
+      - .env.integration
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -c "pip install --no-cache-dir uv &&
+             uv sync &&
+             uv run pytest -m integration -v"
+

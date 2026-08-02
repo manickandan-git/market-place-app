@@ -1,0 +1,5 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.testing.pytestArgs": ["integration_tests"],
+  "python.testing.pytestEnabled": true
+}

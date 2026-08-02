@@ -134,6 +134,33 @@ class RefreshRequest(BaseModel):
     )
 
 
+class ServiceTokenRequest(BaseModel):
+    """
+    Client-credentials request used by trusted internal services
+    (e.g. Inventory Sync) to obtain a scope-bearing access token.
+
+    The granted scope is fixed per registered client_id; it is not
+    chosen by the caller.
+    """
+
+    client_id: str = Field(min_length=1)
+    client_secret: str = Field(min_length=1)
+
+
+class ServiceTokenResponse(BaseModel):
+    """
+    Access token issued to a service client.
+
+    Service tokens are not tied to a user session, so there is no
+    refresh token or rotation.
+    """
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    scope: str
+
+
 class LogoutRequest(BaseModel):
     """
     Request body used to revoke a refresh-token session.

@@ -100,8 +100,13 @@ services:
       - INTERNAL_API_KEY=f9fbc3c5dfa3b56d5b0f941f957761894191f287639a772576e450a460a52ec6
       - IDENTITY_SERVICE_URL=http://marketplace-auth-service:8001
     volumes:
-      - ./services/notification-service:/app
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload"
+      # Only source dirs are mounted (not the whole service directory): the
+      # image's dependencies are a uv-managed .venv baked in at build time,
+      # and bind-mounting the full directory would shadow it with the host's
+      # own (Windows) .venv and break the container.
+      - ./services/notification-service/app:/app/app
+      - ./services/notification-service/alembic:/app/alembic
+    command: sh -c "uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload"
     depends_on:
       marketplace-notification-db:
         condition: service_healthy
@@ -260,7 +265,63 @@ services:
       marketplace-auth-service:
         condition: service_started
 
-  # 15. The Notification Worker (Celery)
+  # 15. The Cart Service Database
+  marketplace-cart-db:
+    image: postgres:16-alpine
+    container_name: marketplace-cart-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=cart_service
+    ports:
+      - "5438:5432"
+    volumes:
+      - marketplace_cart_service_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d cart_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 16. The Cart Service (API)
+  marketplace-cart-service:
+    build:
+      context: ./services/cart-service
+      dockerfile: Dockerfile
+    ports:
+      - "8006:8006"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-cart-db:5432/cart_service
+      # JWT_ISSUER is a literal string compared against the access token's
+      # "iss" claim, which auth-service bakes in from its own JWT_ISSUER
+      # setting (http://localhost:8001) — this must match that value exactly
+      # and is NOT a network address, unlike JWT_JWKS_URL below.
+      - JWT_ISSUER=http://localhost:8001
+      - JWT_AUDIENCE=marketplace-api
+      - JWT_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      - PRODUCT_SERVICE_URL=http://marketplace-product-service:8004
+      - INVENTORY_SERVICE_URL=http://marketplace-inventory-service:8005
+      - CORS_ORIGINS=["http://localhost:3000"]
+    volumes:
+      # Only source dirs are mounted (not the whole service directory): the
+      # image's dependencies are a uv-managed .venv baked in at build time,
+      # and bind-mounting the full directory would shadow it with the host's
+      # own (Windows) .venv and break the container.
+      - ./services/cart-service/app:/app/app
+      - ./services/cart-service/alembic:/app/alembic
+    command: sh -c "uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8006 --reload"
+    depends_on:
+      marketplace-cart-db:
+        condition: service_healthy
+      marketplace-auth-service:
+        condition: service_started
+      marketplace-product-service:
+        condition: service_started
+      marketplace-inventory-service:
+        condition: service_started
+
+  # 17. The Notification Worker (Celery)
   marketplace-notification-worker:
     build:
       context: ./services/notification-service
@@ -275,8 +336,13 @@ services:
       - INTERNAL_API_KEY=f9fbc3c5dfa3b56d5b0f941f957761894191f287639a772576e450a460a52ec6
       - IDENTITY_SERVICE_URL=http://marketplace-auth-service:8001
     volumes:
-      - ./services/notification-service:/app
-    command: sh -c "celery -A app.celery_app worker --loglevel=info -Q notifications,notification-retries"
+      # Only source dirs are mounted (not the whole service directory): the
+      # image's dependencies are a uv-managed .venv baked in at build time,
+      # and bind-mounting the full directory would shadow it with the host's
+      # own (Windows) .venv and break the container.
+      - ./services/notification-service/app:/app/app
+      - ./services/notification-service/alembic:/app/alembic
+    command: sh -c "uv run --no-sync celery -A app.celery_app worker --loglevel=info -Q notifications,notification-retries"
     depends_on:
       marketplace-notification-db:
         condition: service_healthy
@@ -290,3 +356,4 @@ volumes:
   marketplace_user_service_postgres_data:
   marketplace_product_service_postgres_data:
   marketplace_inventory_service_postgres_data:
+  marketplace_cart_service_postgres_data:

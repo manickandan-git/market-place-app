@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     database_url: str = (
         "postgresql+asyncpg://marketplace:marketplace"
-        "@localhost:5433/marketplace_notifications"
+        "@localhost:5433/notification_sersvice"
     )
 
     database_echo: bool = False

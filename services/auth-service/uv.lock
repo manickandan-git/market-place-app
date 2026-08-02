@@ -577,6 +577,7 @@ dependencies = [
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
     { name = "redis" },
+    { name = "ruff" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -605,6 +606,7 @@ requires-dist = [
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "redis", specifier = ">=5.0.0" },
+    { name = "ruff", specifier = ">=0.16.0" },
     { name = "sqlalchemy", specifier = ">=2.0.30" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]

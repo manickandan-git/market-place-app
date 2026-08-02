@@ -28,5 +28,6 @@
     "**/.pytest_cache": true,
     "**/.ruff_cache": true,
     "**/.env": true
+	"**/.env.integration": true
   }
 }

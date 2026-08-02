@@ -40,6 +40,8 @@ from app.schemas import (
     ResendVerificationRequest,
     ResendVerificationResponse,
     ResetPasswordRequest,
+    ServiceTokenRequest,
+    ServiceTokenResponse,
     TokenResponse,
     VerifyEmailRequest,
 )
@@ -677,6 +679,89 @@ async def token_login(
         payload=payload,
         request=request,
         session=session,
+    )
+
+
+# ============================================================
+# Service-to-service tokens (client credentials)
+# ============================================================
+
+
+@router.post(
+    "/service-token",
+    response_model=ServiceTokenResponse,
+)
+async def issue_service_token(
+    payload: ServiceTokenRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> ServiceTokenResponse:
+    """
+    Client-credentials grant for trusted internal services.
+
+    Unlike user login, the issued token is not tied to a User row: the
+    scope granted is fixed per registered client_id.
+    """
+
+    registry = {
+        settings.inventory_sync_client_id: (
+            settings.inventory_sync_client_secret,
+            settings.inventory_sync_subject,
+            "inventory:sync",
+        ),
+    }
+
+    invalid_client = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid client credentials",
+    )
+
+    match = registry.get(payload.client_id)
+
+    if match is None:
+        raise invalid_client
+
+    expected_secret, subject, scope = match
+
+    if not secrets.compare_digest(payload.client_secret, expected_secret):
+        raise invalid_client
+
+    now = utc_now()
+    expiration = now + timedelta(
+        minutes=settings.service_token_expire_minutes,
+    )
+
+    keys = get_signing_keys()
+    access_token = jwt.encode(
+        {
+            "sub": subject,
+            "scope": scope,
+            "type": "service",
+            "iss": settings.jwt_issuer,
+            "aud": settings.jwt_audience,
+            "iat": now,
+            "exp": expiration,
+        },
+        keys.private_pem,
+        algorithm=settings.jwt_access_algorithm,
+        headers={"kid": keys.kid},
+    )
+
+    await create_audit_event(
+        session,
+        event_type="SERVICE_TOKEN_ISSUED",
+        request=request,
+        details={
+            "client_id": payload.client_id,
+            "scope": scope,
+        },
+    )
+    await session.commit()
+
+    return ServiceTokenResponse(
+        access_token=access_token,
+        expires_in=settings.service_token_expire_minutes * 60,
+        scope=scope,
     )
 
 

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # Database
     database_url: str = (
         "postgresql+asyncpg://marketplace:marketplace"
-        "@localhost:5433/marketplace_auth"
+        "@localhost:5433/auth_service"
     )
 
     # Redis
@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     notification_service_url: str = "http://localhost:8002"
     notification_service_api_key: str = "dev-only-internal-api-key-change-me"
     notification_service_timeout_seconds: float = 5.0
+
+    # Service-to-service tokens (client credentials, no user session).
+    # Currently a single registered client: Inventory Sync, which needs
+    # the inventory:sync scope to call Inventory's internal catalog
+    # projection endpoint.
+    service_token_expire_minutes: int = 15
+    inventory_sync_client_id: str = "inventory-sync-service"
+    inventory_sync_client_secret: str = "change-this-in-production-inventory-sync-secret"
+    inventory_sync_subject: str = "00000000-0000-0000-0000-000000000001"
 
     model_config = SettingsConfigDict(
         env_file=".env",

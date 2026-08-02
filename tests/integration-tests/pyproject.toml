@@ -1,0 +1,31 @@
+[project]
+name = "marketplace-integration-tests"
+version = "1.0.0"
+description = "Black-box integration tests for the Marketplace microservices"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28,<1",
+    "pydantic-settings>=2.7,<3",
+    "pyjwt[crypto]>=2.10,<3",
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.25,<1",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["integration_tests"]
+markers = [
+    "integration: requires running Marketplace services",
+    "notification: requires a configured Notification Service test endpoint",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+

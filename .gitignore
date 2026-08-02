@@ -15,3 +15,7 @@ dist/
 build/
 *.egg-info/
 test_auth.db
+.env.integration
+test-results/
+*.pyc
+.git

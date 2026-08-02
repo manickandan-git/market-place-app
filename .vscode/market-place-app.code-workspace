@@ -14,6 +14,12 @@
 		},
 		{
 			"path": "../services/inventory-service"
+		},
+		{
+			"path": "../tests/integration-tests"
+		},
+		{
+			"path": "../services/cart-service"
 		}
 	],
 	"settings": {

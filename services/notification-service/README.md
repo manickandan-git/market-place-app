@@ -44,7 +44,7 @@ Swagger UI has an **Authorize** button (top right) for `X-Internal-API-Key` — 
 When running inside Docker, connect to service DNS names, not `localhost`:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-notification-db:5432/marketplace_notifications
+DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-notification-db:5432/notification_service
 REDIS_URL=redis://marketplace-notification-redis:6379/1
 CELERY_BROKER_URL=redis://marketplace-notification-redis:6379/1
 CELERY_RESULT_BACKEND=redis://marketplace-notification-redis:6379/2
@@ -62,14 +62,14 @@ For local execution outside Docker, set `.env` for how dependencies are running:
 If Postgres/Redis run on your host directly:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@localhost:5432/marketplace_notifications
+DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@localhost:5434/notification_service
 REDIS_URL=redis://localhost:6379/1
 ```
 
 If you reuse Postgres/Redis from this compose stack (published ports):
 
 ```env
-DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@localhost:5434/marketplace_notifications
+DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@localhost:5434/notification_service
 REDIS_URL=redis://localhost:6381/1
 CELERY_BROKER_URL=redis://localhost:6381/1
 CELERY_RESULT_BACKEND=redis://localhost:6381/2

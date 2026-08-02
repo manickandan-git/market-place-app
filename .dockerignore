@@ -1,0 +1,24 @@
+
+# .dockerignore
+**/.env
+services/auth-service/keys/*.pem
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+test_auth.db
+.env.integration
+test-results/
+*.pyc
+.git
+tests
+
