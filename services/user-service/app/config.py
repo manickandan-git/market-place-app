@@ -19,9 +19,18 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+asyncpg://marketplace:marketplace@localhost:5435/user_service"
     )
-    identity_issuer: str = "http://localhost:8001"
-    identity_audience: str = "marketplace-api"
-    identity_jwks_url: str = "http://localhost:8001/.well-known/jwks.json"
+    # Aliased to the bare JWT_* names (no USER_SERVICE_ prefix) so they match
+    # the convention every other service uses for these three settings.
+    identity_issuer: str = Field(
+        default="http://localhost:8001", validation_alias="JWT_ISSUER"
+    )
+    identity_audience: str = Field(
+        default="marketplace-api", validation_alias="JWT_AUDIENCE"
+    )
+    identity_jwks_url: str = Field(
+        default="http://localhost:8001/.well-known/jwks.json",
+        validation_alias="JWT_JWKS_URL",
+    )
     jwt_algorithms: list[str] = ["RS256"]
     database_echo: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]

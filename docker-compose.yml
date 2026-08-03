@@ -145,10 +145,10 @@ services:
       # iss is a literal string compared against the access token's "iss"
       # claim, which auth-service bakes in from its own JWT_ISSUER setting
       # (http://localhost:8001) — this must match that value exactly and is
-      # NOT a network address, unlike IDENTITY_JWKS_URL below.
-      - USER_SERVICE_IDENTITY_ISSUER=http://localhost:8001
-      - USER_SERVICE_IDENTITY_AUDIENCE=marketplace-api
-      - USER_SERVICE_IDENTITY_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      # NOT a network address, unlike JWT_JWKS_URL below.
+      - JWT_ISSUER=http://localhost:8001
+      - JWT_AUDIENCE=marketplace-api
+      - JWT_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
       - USER_SERVICE_CORS_ORIGINS=["http://localhost:3000"]
       - USER_SERVICE_DOCS_ENABLED=true
     volumes:

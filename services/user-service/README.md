@@ -129,14 +129,15 @@ docker compose down -v
 
 ## Configuration
 
-Copy `.env.example` to `.env`. Pydantic uses the
-`USER_SERVICE_` prefix:
+Copy `.env.example` to `.env`. Pydantic uses the `USER_SERVICE_` prefix for
+every setting except the three JWT/identity vars below, which are aliased
+to the same bare `JWT_*` names every other service uses:
 
 ```env
 DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@localhost:5435/user_service
-USER_SERVICE_IDENTITY_ISSUER=http://localhost:8001
-USER_SERVICE_IDENTITY_AUDIENCE=marketplace-api
-USER_SERVICE_IDENTITY_JWKS_URL=http://localhost:8001/.well-known/jwks.json
+JWT_ISSUER=http://localhost:8001
+JWT_AUDIENCE=marketplace-api
+JWT_JWKS_URL=http://localhost:8001/.well-known/jwks.json
 ```
 
 The Identity access token must include:
