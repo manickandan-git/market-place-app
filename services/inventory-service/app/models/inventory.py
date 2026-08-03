@@ -143,6 +143,7 @@ class InventoryReservation(
         Index("ix_reservations_status_expiry", "status", "expires_at"),
         Index("ix_reservations_order", "order_reference"),
         Index("ix_reservations_owner", "customer_id", "status"),
+        Index("ix_reservations_group", "reservation_group_id"),
     )
 
     inventory_item_id: Mapped[UUID] = mapped_column(
@@ -153,6 +154,7 @@ class InventoryReservation(
     customer_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     cart_reference: Mapped[str | None] = mapped_column(String(120))
     order_reference: Mapped[str | None] = mapped_column(String(120))
+    reservation_group_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[ReservationStatus] = mapped_column(
         Enum(ReservationStatus, name="reservation_status", native_enum=False),

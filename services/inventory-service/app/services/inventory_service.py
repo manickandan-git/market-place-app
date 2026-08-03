@@ -1,9 +1,10 @@
 import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,7 @@ from app.models.inventory import (
 from app.models.reliability import AuditLog, IdempotencyRecord, OutboxEvent
 from app.repositories.inventory_repository import InventoryRepository
 from app.schemas.inventory import (
+    BatchReservationCreate,
     CatalogSkuSync,
     InventoryItemCreate,
     InventoryItemUpdate,
@@ -40,7 +42,31 @@ class InventoryService:
         self.settings = get_settings()
 
     @staticmethod
-    def _snapshot(obj: Any) -> dict:
+    def _is_expired(expires_at: datetime, now: datetime) -> bool:
+        # asyncpg/Postgres always returns timezone-aware datetimes for
+        # TIMESTAMPTZ columns, but some drivers (e.g. sqlite, used in tests)
+        # drop tzinfo on DateTime(timezone=True) columns; treat a naive
+        # value as UTC rather than raising on the aware/naive comparison.
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return expires_at <= now
+
+    async def _snapshot(self, obj: Any) -> dict:
+        # Columns with a server-side onupdate/default (e.g. updated_at) are
+        # marked unloaded after a flush; reading them without an explicit
+        # async reload first would force a synchronous lazy-load and crash
+        # with MissingGreenlet under AsyncSession.
+        #
+        # If obj has pending changes, flush (not refresh) first: flush
+        # persists them and repopulates server-computed columns via
+        # RETURNING, whereas refresh() would discard any unflushed
+        # mutations (e.g. a just-set reservation.status) and reload
+        # whatever is still committed in the database.
+        if obj in self.session.dirty or obj in self.session.new:
+            await self.session.flush()
+        column_keys = {column.key for column in obj.__table__.columns}
+        if sa_inspect(obj).unloaded & column_keys:
+            await self.session.refresh(obj)
         return {
             column.name: jsonable_encoder(getattr(obj, column.name))
             for column in obj.__table__.columns
@@ -159,7 +185,7 @@ class InventoryService:
             resource_type="warehouse",
             resource_id=warehouse.id,
             before=None,
-            after=self._snapshot(warehouse),
+            after=await self._snapshot(warehouse),
             request_id=request_id,
         )
         await self.session.commit()
@@ -176,7 +202,7 @@ class InventoryService:
             data.variant_id,
             for_update=True,
         )
-        before = self._snapshot(projection) if projection else None
+        before = await self._snapshot(projection) if projection else None
         if projection:
             projection.product_id = data.product_id
             projection.seller_id = data.seller_id
@@ -193,7 +219,7 @@ class InventoryService:
             resource_type="catalog_sku",
             resource_id=projection.variant_id,
             before=before,
-            after=self._snapshot(projection),
+            after=await self._snapshot(projection),
             request_id=request_id,
         )
         await self.session.commit()
@@ -212,7 +238,7 @@ class InventoryService:
         if not warehouse:
             raise ServiceError(404, "warehouse_not_found", "Warehouse was not found")
         self._check_version(warehouse, expected_version)
-        before = self._snapshot(warehouse)
+        before = await self._snapshot(warehouse)
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(warehouse, field, value)
         warehouse.version += 1
@@ -223,7 +249,7 @@ class InventoryService:
             resource_type="warehouse",
             resource_id=warehouse.id,
             before=before,
-            after=self._snapshot(warehouse),
+            after=await self._snapshot(warehouse),
             request_id=request_id,
         )
         await self.session.commit()
@@ -304,7 +330,7 @@ class InventoryService:
             resource_type="inventory_item",
             resource_id=item.id,
             before=None,
-            after=self._snapshot(item),
+            after=await self._snapshot(item),
             request_id=request_id,
         )
         self._event("inventory.item.created.v1", item)
@@ -332,7 +358,7 @@ class InventoryService:
     ) -> InventoryItem:
         item = await self._managed_item(item_id, principal, for_update=True)
         self._check_version(item, expected_version)
-        before = self._snapshot(item)
+        before = await self._snapshot(item)
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(item, field, value)
         item.version += 1
@@ -343,7 +369,7 @@ class InventoryService:
             resource_type="inventory_item",
             resource_id=item.id,
             before=before,
-            after=self._snapshot(item),
+            after=await self._snapshot(item),
             request_id=request_id,
         )
         self._event("inventory.item.updated.v1", item)
@@ -382,7 +408,7 @@ class InventoryService:
                 "insufficient_unreserved_stock",
                 "Adjustment would reduce stock below the reserved quantity",
             )
-        before = self._snapshot(item)
+        before = await self._snapshot(item)
         item.on_hand_quantity = resulting_on_hand
         item.version += 1
         self._movement(
@@ -401,7 +427,7 @@ class InventoryService:
             resource_type="inventory_item",
             resource_id=item.id,
             before=before,
-            after=self._snapshot(item),
+            after=await self._snapshot(item),
             request_id=request_id,
         )
         self._event("inventory.stock.adjusted.v1", item)
@@ -470,7 +496,7 @@ class InventoryService:
                 "invalid_expiration",
                 "Reservation expiration exceeds the configured maximum",
             )
-        before = self._snapshot(item)
+        before = await self._snapshot(item)
         item.reserved_quantity += data.quantity
         item.version += 1
         reservation = InventoryReservation(
@@ -497,7 +523,7 @@ class InventoryService:
             resource_type="inventory_reservation",
             resource_id=reservation.id,
             before=None,
-            after=self._snapshot(reservation),
+            after=await self._snapshot(reservation),
             request_id=request_id,
         )
         self._audit(
@@ -506,7 +532,7 @@ class InventoryService:
             resource_type="inventory_item",
             resource_id=item.id,
             before=before,
-            after=self._snapshot(item),
+            after=await self._snapshot(item),
             request_id=request_id,
         )
         self._event("inventory.reservation.created.v1", item, reservation=reservation)
@@ -525,6 +551,323 @@ class InventoryService:
         await self.session.refresh(reservation)
         return reservation
 
+    async def create_batch_reservation(
+        self,
+        data: BatchReservationCreate,
+        principal: Principal,
+        request_id: str | None,
+        idempotency_key: str | None,
+    ) -> tuple[UUID, list[InventoryReservation]]:
+        """Reserve multiple (seller_id, sku) lines atomically as one group.
+
+        Resolves lines by (seller_id, sku) rather than a client-supplied
+        inventory_item_id, since Order/Cart never see Inventory's private IDs
+        (see docs/inventory-checkout-contract.md in order-service). A line's
+        quantity may be split across more than one warehouse row for the same
+        SKU, so a single line can produce multiple reservation rows sharing
+        one reservation_group_id.
+        """
+        request_hash = hashlib.sha256(
+            data.model_dump_json().encode("utf-8")
+        ).hexdigest()
+        existing = await self._idempotency_lookup(
+            principal,
+            idempotency_key,
+            request_hash,
+        )
+        if existing and existing.resource_id:
+            reservations = await self.repo.list_reservations_by_group(
+                existing.resource_id
+            )
+            if reservations:
+                return existing.resource_id, reservations
+
+        now = datetime.now(UTC)
+        expires_at = data.expires_at or (
+            now + timedelta(minutes=self.settings.default_reservation_minutes)
+        )
+        if expires_at <= now:
+            raise ServiceError(
+                422,
+                "invalid_expiration",
+                "Reservation expiration must be in the future",
+            )
+        maximum = now + timedelta(minutes=self.settings.max_reservation_minutes)
+        if expires_at > maximum:
+            raise ServiceError(
+                422,
+                "invalid_expiration",
+                "Reservation expiration exceeds the configured maximum",
+            )
+
+        pairs = {(line.seller_id, line.sku) for line in data.lines}
+        candidates = await self.repo.get_items_for_reservation(pairs, for_update=True)
+        by_pair: dict[tuple[UUID, str], list[InventoryItem]] = {}
+        for candidate in candidates:
+            by_pair.setdefault((candidate.seller_id, candidate.sku), []).append(
+                candidate
+            )
+        for items in by_pair.values():
+            items.sort(key=lambda i: i.id)
+
+        group_id = uuid4()
+        reservations: list[InventoryReservation] = []
+        touched: dict[UUID, tuple[InventoryItem, dict]] = {}
+        for line in data.lines:
+            items = by_pair.get((line.seller_id, line.sku), [])
+            if not items:
+                raise ServiceError(
+                    422,
+                    "invalid_sku",
+                    f"No active inventory was found for seller {line.seller_id} "
+                    f"SKU {line.sku}",
+                )
+            available = sum(item.available_quantity for item in items)
+            if available < line.quantity:
+                raise ServiceError(
+                    409,
+                    "insufficient_stock",
+                    f"Only {available} units are available for SKU {line.sku}",
+                )
+            remaining = line.quantity
+            for item in items:
+                if remaining <= 0:
+                    break
+                take = min(item.available_quantity, remaining)
+                if take <= 0:
+                    continue
+                if item.id not in touched:
+                    touched[item.id] = (item, await self._snapshot(item))
+                item.reserved_quantity += take
+                item.version += 1
+                reservation = InventoryReservation(
+                    inventory_item_id=item.id,
+                    customer_id=principal.subject,
+                    cart_reference=data.cart_reference,
+                    order_reference=data.order_reference,
+                    quantity=take,
+                    expires_at=expires_at,
+                    reservation_group_id=group_id,
+                )
+                self.session.add(reservation)
+                reservations.append(reservation)
+                remaining -= take
+
+        await self.session.flush()
+
+        for item, before in touched.values():
+            self._movement(
+                item=item,
+                principal=principal,
+                movement_type=MovementType.RESERVATION,
+                reason=MovementReason.CUSTOMER_ORDER,
+                reserved_delta=item.reserved_quantity - before["reserved_quantity"],
+                reference_type="reservation_group",
+                reference_id=str(group_id),
+            )
+            self._audit(
+                principal=principal,
+                action="stock.reserved",
+                resource_type="inventory_item",
+                resource_id=item.id,
+                before=before,
+                after=await self._snapshot(item),
+                request_id=request_id,
+            )
+            self._add_low_stock_event_if_needed(item)
+        for reservation in reservations:
+            item, _ = touched[reservation.inventory_item_id]
+            self._audit(
+                principal=principal,
+                action="reservation.created",
+                resource_type="inventory_reservation",
+                resource_id=reservation.id,
+                before=None,
+                after=await self._snapshot(reservation),
+                request_id=request_id,
+            )
+            self._event(
+                "inventory.reservation.created.v1",
+                item,
+                reservation=reservation,
+            )
+
+        if idempotency_key:
+            self.session.add(
+                IdempotencyRecord(
+                    actor_id=principal.subject,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                    resource_type="reservation_group",
+                    resource_id=group_id,
+                )
+            )
+        await self.session.commit()
+        for reservation in reservations:
+            await self.session.refresh(reservation)
+        return group_id, reservations
+
+    async def commit_reservation_group(
+        self,
+        group_id: UUID,
+        principal: Principal,
+        request_id: str | None,
+    ) -> list[InventoryReservation]:
+        reservations = await self._locked_group(group_id, principal)
+        statuses = {reservation.status for reservation in reservations}
+        if statuses == {ReservationStatus.COMMITTED}:
+            return reservations
+        if statuses != {ReservationStatus.ACTIVE}:
+            raise ServiceError(
+                409,
+                "reservation_group_not_active",
+                "Reservation group is not fully active and cannot be committed",
+            )
+
+        now = datetime.now(UTC)
+        item_ids = {reservation.inventory_item_id for reservation in reservations}
+        items_by_id = {
+            item.id: item
+            for item in await self.repo.get_items_by_ids(item_ids, for_update=True)
+        }
+        if any(self._is_expired(r.expires_at, now) for r in reservations):
+            for reservation in reservations:
+                item = items_by_id.get(reservation.inventory_item_id)
+                if item:
+                    await self._resolve_reservation(
+                        reservation=reservation,
+                        item=item,
+                        principal=principal,
+                        target=ReservationStatus.EXPIRED,
+                        reason=MovementReason.RESERVATION_EXPIRED,
+                        request_id=request_id,
+                    )
+            await self.session.commit()
+            raise ServiceError(
+                409,
+                "reservation_expired",
+                "Reservation group expired before it could be committed",
+            )
+
+        for reservation in reservations:
+            item = items_by_id.get(reservation.inventory_item_id)
+            if not item:
+                raise ServiceError(
+                    409,
+                    "inventory_item_missing",
+                    "Reserved inventory item no longer exists",
+                )
+            before_item = await self._snapshot(item)
+            before_reservation = await self._snapshot(reservation)
+            item.reserved_quantity -= reservation.quantity
+            item.on_hand_quantity -= reservation.quantity
+            item.version += 1
+            reservation.status = ReservationStatus.COMMITTED
+            reservation.resolved_at = now
+            reservation.version += 1
+            self._movement(
+                item=item,
+                principal=principal,
+                movement_type=MovementType.COMMITMENT,
+                reason=MovementReason.CUSTOMER_ORDER,
+                on_hand_delta=-reservation.quantity,
+                reserved_delta=-reservation.quantity,
+                reference_type="reservation_group",
+                reference_id=str(group_id),
+            )
+            await self._audit_resolution(
+                principal,
+                reservation,
+                item,
+                before_reservation,
+                before_item,
+                "reservation.committed",
+                request_id,
+            )
+            self._event(
+                "inventory.reservation.committed.v1",
+                item,
+                reservation=reservation,
+            )
+        await self.session.commit()
+        for reservation in reservations:
+            await self.session.refresh(reservation)
+        return reservations
+
+    async def release_reservation_group(
+        self,
+        group_id: UUID,
+        reason: MovementReason,
+        note: str | None,
+        principal: Principal,
+        request_id: str | None,
+    ) -> list[InventoryReservation]:
+        reservations = await self._locked_group(group_id, principal)
+        statuses = {reservation.status for reservation in reservations}
+        if statuses == {ReservationStatus.RELEASED}:
+            return reservations
+        if statuses != {ReservationStatus.ACTIVE}:
+            raise ServiceError(
+                409,
+                "reservation_group_not_active",
+                "Reservation group is not fully active and cannot be released",
+            )
+
+        item_ids = {reservation.inventory_item_id for reservation in reservations}
+        items_by_id = {
+            item.id: item
+            for item in await self.repo.get_items_by_ids(item_ids, for_update=True)
+        }
+        for reservation in reservations:
+            item = items_by_id.get(reservation.inventory_item_id)
+            if not item:
+                raise ServiceError(
+                    409,
+                    "inventory_item_missing",
+                    "Reserved inventory item no longer exists",
+                )
+            await self._resolve_reservation(
+                reservation=reservation,
+                item=item,
+                principal=principal,
+                target=ReservationStatus.RELEASED,
+                reason=reason,
+                request_id=request_id,
+                note=note,
+            )
+        await self.session.commit()
+        for reservation in reservations:
+            await self.session.refresh(reservation)
+        return reservations
+
+    async def _locked_group(
+        self,
+        group_id: UUID,
+        principal: Principal,
+    ) -> list[InventoryReservation]:
+        reservations = await self.repo.list_reservations_by_group(
+            group_id,
+            for_update=True,
+        )
+        if not reservations:
+            raise ServiceError(
+                404,
+                "reservation_group_not_found",
+                "Reservation group was not found",
+            )
+        owner_id = reservations[0].customer_id
+        if (
+            not principal.has_role("admin", "seller")
+            and owner_id != principal.subject
+            and not principal.has_scope("inventory:commit")
+        ):
+            raise ServiceError(
+                403,
+                "reservation_forbidden",
+                "Reservation group belongs to another customer",
+            )
+        return reservations
+
     async def commit_reservation(
         self,
         reservation_id: UUID,
@@ -537,7 +880,7 @@ class InventoryService:
             principal,
         )
         now = datetime.now(UTC)
-        if reservation.expires_at <= now:
+        if self._is_expired(reservation.expires_at, now):
             await self._resolve_reservation(
                 reservation=reservation,
                 item=item,
@@ -552,8 +895,8 @@ class InventoryService:
                 "reservation_expired",
                 "Reservation expired before it could be committed",
             )
-        before_item = self._snapshot(item)
-        before_reservation = self._snapshot(reservation)
+        before_item = await self._snapshot(item)
+        before_reservation = await self._snapshot(reservation)
         item.reserved_quantity -= reservation.quantity
         item.on_hand_quantity -= reservation.quantity
         item.version += 1
@@ -571,7 +914,7 @@ class InventoryService:
             reference_type="order",
             reference_id=order_reference,
         )
-        self._audit_resolution(
+        await self._audit_resolution(
             principal,
             reservation,
             item,
@@ -694,8 +1037,8 @@ class InventoryService:
         request_id: str | None,
         note: str | None = None,
     ) -> None:
-        before_item = self._snapshot(item)
-        before_reservation = self._snapshot(reservation)
+        before_item = await self._snapshot(item)
+        before_reservation = await self._snapshot(reservation)
         item.reserved_quantity -= reservation.quantity
         item.version += 1
         reservation.status = target
@@ -711,7 +1054,7 @@ class InventoryService:
             reference_id=str(reservation.id),
             note=note,
         )
-        self._audit_resolution(
+        await self._audit_resolution(
             principal,
             reservation,
             item,
@@ -726,7 +1069,7 @@ class InventoryService:
             reservation=reservation,
         )
 
-    def _audit_resolution(
+    async def _audit_resolution(
         self,
         principal: Principal,
         reservation: InventoryReservation,
@@ -742,7 +1085,7 @@ class InventoryService:
             resource_type="inventory_reservation",
             resource_id=reservation.id,
             before=before_reservation,
-            after=self._snapshot(reservation),
+            after=await self._snapshot(reservation),
             request_id=request_id,
         )
         self._audit(
@@ -751,7 +1094,7 @@ class InventoryService:
             resource_type="inventory_item",
             resource_id=item.id,
             before=before_item,
-            after=self._snapshot(item),
+            after=await self._snapshot(item),
             request_id=request_id,
         )
 

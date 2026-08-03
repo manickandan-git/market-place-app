@@ -160,20 +160,46 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
 
 ## Known gaps / in-progress work
 
-- **Inventory batch reservation endpoints are not yet implemented.**
-  Inventory currently reserves one `inventory_item_id` at a time, but Cart
-  only knows SKUs, not internal Inventory IDs. Order-service's checkout flow
-  needs Inventory to add `POST /api/v1/internal/checkout/reservations/batch`
-  (+ `/{group_id}/commit` and `/{group_id}/release`) before real end-to-end
-  checkout works — see `services/order-service/docs/inventory-checkout-contract.md`
-  for the full contract. Until then, order-service checkout against real
-  Inventory is expected to be incomplete.
+- **Inventory batch reservation endpoints are now implemented**
+  (`POST /api/v1/internal/checkout/reservations/batch`,
+  `/{group_id}/commit`, `/{group_id}/release` in `services/inventory-service`)
+  per `services/order-service/docs/inventory-checkout-contract.md`. Lines are
+  resolved by `(seller_id, sku)` — never a client-supplied
+  `inventory_item_id` — and a line's quantity can split across more than one
+  warehouse row for that SKU, sharing one `reservation_group_id`. Commit and
+  release are idempotent at the group level (repeat calls on an
+  already-committed/released group are safe no-ops); a mixed-status group
+  (partially committed/released) is rejected as a conflict rather than
+  partially applied.
+  Fixed alongside this: `InventoryService._snapshot()` (used for audit-log
+  before/after rows) previously either crashed with `MissingGreenlet` when
+  reading a column expired by a prior flush, or — worse — called
+  `session.refresh()` on objects with *unflushed* pending changes, silently
+  reverting them (e.g. a reservation's `status = COMMITTED` write could be
+  discarded before it was ever persisted). This affected every mutating
+  method in the service (`create_reservation`, `commit_reservation`,
+  `adjust_stock`, etc.), not just the new batch endpoints — it's now fixed
+  service-wide by flushing (never refreshing) dirty/new objects before
+  snapshotting them.
 - **Payment service does not exist yet.** order-service's README lists
   Payment as "next service" — it will own provider integrations,
   authorization, capture, and refunds. order-service already has internal
   callback routes reserved for it (`/internal/orders/{id}/payment-authorized`,
   `/internal/orders/{id}/payment-failed`, scope `orders:payment`) even
   though nothing calls them yet.
+- **`services/inventory-service` now has DB-backed async unit tests**
+  (`tests/test_batch_reservation.py`, 14 tests) using an in-memory
+  `sqlite+aiosqlite` engine, matching the fixture pattern already used in
+  `services/order-service/tests/conftest.py`. `tests/conftest.py` registers
+  a `@compiles(JSONB, "sqlite")` shim (test-only; production still uses real
+  `JSONB` on Postgres) since sqlite has no native JSONB type. Writing these
+  tests surfaced one more real bug: `reservation.expires_at` comparisons
+  (`commit_reservation`, `commit_reservation_group`) assumed the DB driver
+  always returns timezone-aware datetimes — true for asyncpg/Postgres, but
+  not guaranteed across drivers — and would raise `TypeError` on a naive
+  value instead of comparing correctly. Fixed with
+  `InventoryService._is_expired()`, which treats a naive `expires_at` as
+  UTC rather than crashing.
 - **Notification Service source was unavailable when the integration-test
   kit was built**, so its internal route is configurable via
   `NOTIFICATION_TEST_ENDPOINT` rather than hardcoded — check

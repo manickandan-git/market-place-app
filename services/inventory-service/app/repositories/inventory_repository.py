@@ -172,6 +172,62 @@ class InventoryRepository:
         )
         return list((await self.session.scalars(stmt)).all())
 
+    async def get_items_for_reservation(
+        self,
+        pairs: set[tuple[UUID, str]],
+        *,
+        for_update: bool = False,
+    ) -> list[InventoryItem]:
+        if not pairs:
+            return []
+        seller_ids = {pair[0] for pair in pairs}
+        skus = {pair[1] for pair in pairs}
+        stmt = (
+            select(InventoryItem)
+            .where(
+                InventoryItem.seller_id.in_(seller_ids),
+                InventoryItem.sku.in_(skus),
+                InventoryItem.is_active.is_(True),
+            )
+            .order_by(InventoryItem.id)
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        rows = (await self.session.scalars(stmt)).all()
+        return [row for row in rows if (row.seller_id, row.sku) in pairs]
+
+    async def get_items_by_ids(
+        self,
+        ids: set[UUID],
+        *,
+        for_update: bool = False,
+    ) -> list[InventoryItem]:
+        if not ids:
+            return []
+        stmt = (
+            select(InventoryItem)
+            .where(InventoryItem.id.in_(ids))
+            .order_by(InventoryItem.id)
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return list((await self.session.scalars(stmt)).all())
+
+    async def list_reservations_by_group(
+        self,
+        group_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> list[InventoryReservation]:
+        stmt = (
+            select(InventoryReservation)
+            .where(InventoryReservation.reservation_group_id == group_id)
+            .order_by(InventoryReservation.id)
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return list((await self.session.scalars(stmt)).all())
+
     async def list_movements(
         self,
         item_id: UUID,

@@ -15,6 +15,7 @@ from app.routes.dependencies import get_inventory_service
 from app.schemas.common import PaginatedResponse
 from app.schemas.inventory import (
     AvailabilityResponse,
+    BatchReservationCreate,
     CatalogSkuResponse,
     CatalogSkuSync,
     InventoryItemCreate,
@@ -23,6 +24,7 @@ from app.schemas.inventory import (
     MovementResponse,
     ReservationCommit,
     ReservationCreate,
+    ReservationGroupResponse,
     ReservationRelease,
     ReservationResponse,
     StockAdjustment,
@@ -373,6 +375,69 @@ async def release_reservation(
         principal,
         getattr(request.state, "request_id", None),
     )
+
+
+@router.post(
+    "/internal/checkout/reservations/batch",
+    response_model=ReservationGroupResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["checkout"],
+)
+async def create_reservation_batch(
+    data: BatchReservationCreate,
+    request: Request,
+    principal: AuthenticatedPrincipal,
+    service: Service,
+    idempotency_key: IdempotencyKey,
+):
+    group_id, reservations = await service.create_batch_reservation(
+        data,
+        principal,
+        getattr(request.state, "request_id", None),
+        idempotency_key,
+    )
+    return ReservationGroupResponse.from_reservations(group_id, reservations)
+
+
+@router.post(
+    "/internal/checkout/reservations/{group_id}/commit",
+    response_model=ReservationGroupResponse,
+    tags=["checkout"],
+)
+async def commit_reservation_batch(
+    group_id: UUID,
+    request: Request,
+    principal: AuthenticatedPrincipal,
+    service: Service,
+):
+    reservations = await service.commit_reservation_group(
+        group_id,
+        principal,
+        getattr(request.state, "request_id", None),
+    )
+    return ReservationGroupResponse.from_reservations(group_id, reservations)
+
+
+@router.post(
+    "/internal/checkout/reservations/{group_id}/release",
+    response_model=ReservationGroupResponse,
+    tags=["checkout"],
+)
+async def release_reservation_batch(
+    group_id: UUID,
+    data: ReservationRelease,
+    request: Request,
+    principal: AuthenticatedPrincipal,
+    service: Service,
+):
+    reservations = await service.release_reservation_group(
+        group_id,
+        data.reason,
+        data.note,
+        principal,
+        getattr(request.state, "request_id", None),
+    )
+    return ReservationGroupResponse.from_reservations(group_id, reservations)
 
 
 @router.post("/internal/reservations/expire", tags=["reservations"])

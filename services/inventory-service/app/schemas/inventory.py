@@ -188,6 +188,50 @@ class ReservationResponse(APIModel):
     version: int
 
 
+class BatchReservationLine(APIModel):
+    sku: str = Field(min_length=2, max_length=80, pattern=SKU_PATTERN)
+    seller_id: UUID
+    quantity: int = Field(gt=0, le=1_000_000)
+
+    _normalize_sku = field_validator("sku", mode="before")(normalize_upper)
+
+
+class BatchReservationCreate(APIModel):
+    cart_reference: str | None = Field(default=None, max_length=120)
+    order_reference: str | None = Field(default=None, max_length=120)
+    expires_at: AwareDatetime | None = None
+    lines: list[BatchReservationLine] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_lines(self) -> Self:
+        seen = {(line.seller_id, line.sku) for line in self.lines}
+        if len(seen) != len(self.lines):
+            raise ValueError(
+                "Each (seller_id, sku) pair must appear at most once per batch"
+            )
+        return self
+
+
+class ReservationGroupResponse(APIModel):
+    reservation_group_id: UUID
+    reservation_ids: list[UUID]
+    status: ReservationStatus
+    expires_at: datetime
+
+    @classmethod
+    def from_reservations(cls, group_id: UUID, reservations: list) -> Self:
+        return cls(
+            reservation_group_id=group_id,
+            reservation_ids=[reservation.id for reservation in reservations],
+            status=(
+                reservations[0].status
+                if len({reservation.status for reservation in reservations}) == 1
+                else ReservationStatus.ACTIVE
+            ),
+            expires_at=reservations[0].expires_at,
+        )
+
+
 class MovementResponse(APIModel):
     id: UUID
     inventory_item_id: UUID
