@@ -349,6 +349,65 @@ services:
       marketplace-notification-redis:
         condition: service_started
 
+  # 18. The Order Service Database
+  marketplace-order-db:
+    image: postgres:16-alpine
+    container_name: marketplace-order-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=order_service
+    ports:
+      - "5439:5432"
+    volumes:
+      - marketplace_order_service_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d order_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 19. The Order Service (API)
+  marketplace-order-service:
+    build:
+      context: ./services/order-service
+      dockerfile: Dockerfile
+    ports:
+      - "8007:8007"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-order-db:5432/order_service
+      # JWT_ISSUER is a literal string compared against the access token's
+      # "iss" claim, which auth-service bakes in from its own JWT_ISSUER
+      # setting (http://localhost:8001) — this must match that value exactly
+      # and is NOT a network address, unlike JWT_JWKS_URL below.
+      - JWT_ISSUER=http://localhost:8001
+      - JWT_AUDIENCE=marketplace-api
+      - JWT_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      - CART_SERVICE_URL=http://marketplace-cart-service:8006
+      - PRODUCT_SERVICE_URL=http://marketplace-product-service:8004
+      - INVENTORY_SERVICE_URL=http://marketplace-inventory-service:8005
+      - NOTIFICATION_SERVICE_URL=http://marketplace-notification-service:8002
+      - NOTIFICATION_INTERNAL_API_KEY=f9fbc3c5dfa3b56d5b0f941f957761894191f287639a772576e450a460a52ec6
+      - CORS_ORIGINS=["http://localhost:3000"]
+    volumes:
+      - ./services/order-service/app:/app/app
+      - ./services/order-service/alembic:/app/alembic
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8007 --reload"
+    depends_on:
+      marketplace-order-db:
+        condition: service_healthy
+      marketplace-auth-service:
+        condition: service_started
+      marketplace-cart-service:
+        condition: service_started
+      marketplace-product-service:
+        condition: service_started
+      marketplace-inventory-service:
+        condition: service_started
+      marketplace-notification-service:
+        condition: service_started
+
 # Named volumes block tells Docker where to store the database files on your host machine safely
 volumes:
   marketplace_auth_service_postgres_data:
@@ -357,3 +416,4 @@ volumes:
   marketplace_product_service_postgres_data:
   marketplace_inventory_service_postgres_data:
   marketplace_cart_service_postgres_data:
+  marketplace_order_service_postgres_data:

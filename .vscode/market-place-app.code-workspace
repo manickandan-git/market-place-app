@@ -20,6 +20,9 @@
 		},
 		{
 			"path": "../services/cart-service"
+		},
+		{
+			"path": "../services/order-service"
 		}
 	],
 	"settings": {
