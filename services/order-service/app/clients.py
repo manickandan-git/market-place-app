@@ -44,7 +44,7 @@ class CartClient:
                 "/api/v1/cart/readiness",
                 headers={
                     **_headers(token, request_id),
-                    "If-Match": str(version),
+                    "If-Match-Version": str(version),
                 },
             )
         except httpx.RequestError as exc:
@@ -73,10 +73,8 @@ class CartClient:
         return CartSnapshot.model_validate(cart)
 
     async def mark_checked_out(
-        self, cart_id: UUID, order_id: UUID, request_id: str | None
+        self, cart_id: UUID, order_id: UUID, token: str, request_id: str | None
     ) -> None:
-        if not self.settings.order_service_access_token:
-            return
         owns = self.client is None
         client = self.client or httpx.AsyncClient(
             base_url=self.settings.cart_service_url,
@@ -86,7 +84,7 @@ class CartClient:
             response = await client.post(
                 f"/api/v1/internal/carts/{cart_id}/checked-out",
                 json={"order_id": str(order_id)},
-                headers=_headers(self.settings.order_service_access_token, request_id),
+                headers=_headers(token, request_id),
             )
         except httpx.RequestError as exc:
             raise ServiceError(503, "cart_unavailable", "Cart update failed") from exc

@@ -384,11 +384,14 @@ services:
       - JWT_ISSUER=http://localhost:8001
       - JWT_AUDIENCE=marketplace-api
       - JWT_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      - AUTH_SERVICE_URL=http://marketplace-auth-service:8001
       - CART_SERVICE_URL=http://marketplace-cart-service:8006
       - PRODUCT_SERVICE_URL=http://marketplace-product-service:8004
       - INVENTORY_SERVICE_URL=http://marketplace-inventory-service:8005
       - NOTIFICATION_SERVICE_URL=http://marketplace-notification-service:8002
       - NOTIFICATION_INTERNAL_API_KEY=f9fbc3c5dfa3b56d5b0f941f957761894191f287639a772576e450a460a52ec6
+      - ORDER_SERVICE_CLIENT_ID=order-service
+      - ORDER_SERVICE_CLIENT_SECRET=cHfp2Wl2TbGjNVWzErVOooPhsaSjKd34eL5GZ_vZm0U
       - CORS_ORIGINS=["http://localhost:3000"]
     volumes:
       - ./services/order-service/app:/app/app
@@ -408,10 +411,69 @@ services:
       marketplace-notification-service:
         condition: service_started
 
+  # 20. The Payment Service Database
+  marketplace-payment-db:
+    image: postgres:16-alpine
+    container_name: marketplace-payment-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=payment_service
+    ports:
+      - "5440:5432"
+    volumes:
+      - marketplace_payment_service_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d payment_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 21. The Payment Service (API)
+  marketplace-payment-service:
+    build:
+      context: ./services/payment-service
+      dockerfile: Dockerfile
+    ports:
+      - "8008:8008"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-payment-db:5432/payment_service
+      # JWT_ISSUER is a literal string compared against the access token's
+      # "iss" claim, which auth-service bakes in from its own JWT_ISSUER
+      # setting (http://localhost:8001) — this must match that value exactly
+      # and is NOT a network address, unlike JWT_JWKS_URL below.
+      - JWT_ISSUER=http://localhost:8001
+      - JWT_AUDIENCE=marketplace-api
+      - JWT_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      - AUTH_SERVICE_URL=http://marketplace-auth-service:8001
+      - ORDER_SERVICE_URL=http://marketplace-order-service:8007
+      - PAYMENT_SERVICE_CLIENT_ID=payment-service
+      - PAYMENT_SERVICE_CLIENT_SECRET=xY33Xgfpd4nzK3fYx3hsR9cOP2ONergC9Y34M5P1OQw
+      - STRIPE_SECRET_KEY=sk_test_51U0XLWPAO1Ix6BTP8DCTdT9qlnuO1FZ1WDmZZncon46XLYrQ8wFiHX1YjfwGSUxPUarzg2jbbT4KFd3bvA8Z663300wa3VoPkY
+      # Fixed dev-only value so signed test events can be constructed without
+      # `stripe listen` running (which mints a new secret each session).
+      # Real deployments must not hardcode this — see payment-service's
+      # README for the `stripe listen` webhook-forwarding setup.
+      - STRIPE_WEBHOOK_SECRET=whsec_dev_only_e2e_workflow_test_secret
+      - CORS_ORIGINS=["http://localhost:3000"]
+    volumes:
+      - ./services/payment-service/app:/app/app
+      - ./services/payment-service/alembic:/app/alembic
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8008 --reload"
+    depends_on:
+      marketplace-payment-db:
+        condition: service_healthy
+      marketplace-auth-service:
+        condition: service_started
+      marketplace-order-service:
+        condition: service_started
+
 # Named volumes block tells Docker where to store the database files on your host machine safely
 volumes:
   marketplace_auth_service_postgres_data:
   marketplace_notification_service_postgres_data:
+  marketplace_payment_service_postgres_data:
   marketplace_user_service_postgres_data:
   marketplace_product_service_postgres_data:
   marketplace_inventory_service_postgres_data:

@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Annotated
 from uuid import UUID
 
@@ -6,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import Principal, bearer, current_principal, require_roles, require_scope
+from app.auth_client import AuthClient
 from app.clients import CartClient, InventoryClient, NotificationClient, ProductClient
 from app.config import Settings, get_settings
 from app.database import get_session
@@ -18,6 +20,7 @@ from app.schemas import (
     Page,
     PaymentAuthorized,
     PaymentFailed,
+    PaymentRefunded,
 )
 from app.service import OrderService
 
@@ -28,9 +31,17 @@ PaymentService = Annotated[Principal, Depends(require_scope("orders:payment"))]
 FulfillmentService = Annotated[Principal, Depends(require_scope("orders:fulfillment"))]
 
 
+@lru_cache
+def get_auth_client() -> AuthClient:
+    # Must be a singleton: its whole purpose is caching the service token
+    # across requests instead of re-authenticating on every callback.
+    return AuthClient(get_settings())
+
+
 async def order_service(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
+    auth_client: AuthClient = Depends(get_auth_client),
 ) -> OrderService:
     return OrderService(
         session,
@@ -39,6 +50,7 @@ async def order_service(
         ProductClient(settings),
         InventoryClient(settings),
         NotificationClient(settings),
+        auth_client,
     )
 
 
@@ -176,6 +188,24 @@ async def payment_failed(
 ) -> OrderResponse:
     order = await service.payment_failed(
         order_id, data, principal, token(credentials), request_id(request)
+    )
+    return OrderResponse.from_order(order)
+
+
+@router.post(
+    "/internal/orders/{order_id}/payment-refunded",
+    response_model=OrderResponse,
+    tags=["integration"],
+)
+async def payment_refunded(
+    order_id: UUID,
+    data: PaymentRefunded,
+    request: Request,
+    principal: PaymentService,
+    service: Service,
+) -> OrderResponse:
+    order = await service.payment_refunded(
+        order_id, data, principal, request_id(request)
     )
     return OrderResponse.from_order(order)
 

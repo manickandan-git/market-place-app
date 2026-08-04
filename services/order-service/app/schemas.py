@@ -96,6 +96,19 @@ class PaymentFailed(APIModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class PaymentRefunded(APIModel):
+    """refunded_amount is the *cumulative* amount refunded on the payment so
+    far (not just this refund), so order-service can deterministically
+    derive REFUNDED vs PARTIALLY_REFUNDED without trusting a status enum
+    from the caller. No payment_reference field: refunding must not
+    overwrite Order.payment_reference, which still identifies the original
+    charge."""
+
+    refunded_amount: Decimal = Field(gt=0)
+    currency_code: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    reason: str | None = Field(default=None, max_length=120)
+
+
 class FulfillmentUpdate(APIModel):
     status: OrderStatus
     shipment_reference: str | None = Field(default=None, max_length=160)

@@ -19,6 +19,7 @@ is a separate `uv` project that exercises the running services over real HTTP.
 | inventory-service | 8005 | Warehouses, seller stock, availability, reservations, movements, low-stock events |
 | cart-service | 8006 | Shopping intent and current price snapshots |
 | order-service | 8007 | Checkout order snapshots and order lifecycle |
+| payment-service | 8008 | Stripe payment authorization, capture, and refunds |
 
 `auth-service` (the Identity Service) is the sole authority for credentials,
 roles, sessions, and JWT issuance. Every other service validates
@@ -43,7 +44,7 @@ the published `localhost` ports above.
 values (byte-for-byte) across every service that verifies tokens — auth-service
 defines the issuer/audience it stamps into tokens (`JWT_ISSUER`, `JWT_AUDIENCE`
 in its `.env`), and every consuming service (order, cart, inventory, product,
-user, ...) must echo those same values plus point `JWT_JWKS_URL` at
+user, payment, ...) must echo those same values plus point `JWT_JWKS_URL` at
 auth-service's `/.well-known/jwks.json`. These three names are consistent
 across all services, including user-service — even though user-service
 prefixes every other setting with `USER_SERVICE_` (see `app/config.py`), its
@@ -55,8 +56,14 @@ further.
 Internal-only endpoints use one of two separate mechanisms, don't confuse
 them: scoped service JWTs (validated the same way as user JWTs, but checked
 for a `scope` claim, e.g. `inventory:sync`, `orders:payment`) for
-Order/Inventory/Product, vs. a static `INTERNAL_API_KEY` shared secret sent as
-`X-Internal-API-Key` for Notification only.
+Order/Inventory/Product/Payment, vs. a static `INTERNAL_API_KEY` shared secret
+sent as `X-Internal-API-Key` for Notification only. Scoped service JWTs are
+obtained via client-credentials at `POST /api/v1/auth/service-token`
+(auth-service), whose registered clients live in a hardcoded `registry` dict
+in `services/auth-service/app/routes.py` (`issue_service_token`) — adding a
+new service-to-service caller means adding both a `Settings` field pair
+(`<name>_client_id`/`<name>_client_secret`) and a registry entry there, not
+just configuring the calling service.
 
 ## Working across services
 
@@ -78,7 +85,7 @@ uv run ruff format .                       # format
 
 Every service also exposes these via `make install|run|test|lint|format|migrate|docker-up|docker-down`
 (and `make check` = lint + test) — targets and port numbers are consistent
-across all seven services.
+across all eight services.
 
 ### Full stack (Docker)
 
@@ -143,11 +150,18 @@ order-service and cart-service:
 - `alembic/` — migrations, applied on container startup (not automatically
   in local `uv run` workflows — run `alembic upgrade head` explicitly).
 
-Newer services (cart, order) split these into packages
+Some services (cart, inventory, payment) split these into packages
 (`app/routes/`, `app/schemas/`, `app/models/`, `app/services/`,
-`app/dependencies/`, `app/middleware/`); older services (auth, user, product,
-inventory) keep them as flat modules. Follow whichever pattern the service
-you're editing already uses.
+`app/dependencies/`, `app/middleware/`); others (auth, user, product, order)
+keep them as flat modules (`app/auth.py`, `app/routes.py`, etc.) — the split
+isn't strictly chronological (order is one of the newest services but stayed
+flat). Follow whichever pattern the service you're editing already uses;
+don't retrofit an existing flat service to packaged just for consistency —
+it's pure churn risk on working code for a cosmetic win. **For any brand-new
+service, use the packaged layout** — it scales better once a service has
+more than one concern (this is a project-structure choice, not a SOLID
+question; both layouts can separate responsibilities equally well within
+routes/service/repository/schema layers).
 
 Each service's own `README.md` documents its public/internal API surface and
 service-specific boundaries (owns X, does not own Y) — read it before adding
@@ -181,12 +195,27 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   `adjust_stock`, etc.), not just the new batch endpoints — it's now fixed
   service-wide by flushing (never refreshing) dirty/new objects before
   snapshotting them.
-- **Payment service does not exist yet.** order-service's README lists
-  Payment as "next service" — it will own provider integrations,
-  authorization, capture, and refunds. order-service already has internal
-  callback routes reserved for it (`/internal/orders/{id}/payment-authorized`,
-  `/internal/orders/{id}/payment-failed`, scope `orders:payment`) even
-  though nothing calls them yet.
+- **Payment service now exists** (`services/payment-service`, port 8008,
+  Stripe test-mode integration). It creates a Stripe PaymentIntent per order
+  (`POST /api/v1/payments`, amount/currency always re-read from order-service,
+  never trusted from the client) and only calls order-service's
+  `payment-authorized`/`payment-failed` callbacks from its Stripe webhook
+  handler (`POST /api/v1/webhooks/stripe`) — confirmation is webhook-driven,
+  not synchronous, matching Stripe's recommended pattern. Local dev requires
+  `stripe listen --forward-to localhost:8008/api/v1/webhooks/stripe`
+  running; see `services/payment-service/README.md`. Full scoping notes
+  (including what was still undesigned before this was built, e.g. refunds)
+  are in `services/order-service/docs/payment-service-scope.md`.
+  auth-service was extended with a `payment-service` client-credentials
+  registration (`orders:payment` scope) to support this — see the
+  client-registry note above.
+  Building it surfaced the same lazy-relationship class of bug again:
+  `Payment.refunded_amount` read the `refunds` relationship synchronously,
+  which crashes under AsyncSession unless eager-loaded. Fixed with
+  `lazy="selectin"` on `Payment.refunds` (`app/models/payment.py`) — the
+  same fix order-service already uses for `Order.items`. If you add a new
+  relationship anywhere and read it from a plain (non-async) property or
+  method, eager-load it the same way rather than relying on lazy load.
 - **`services/inventory-service` now has DB-backed async unit tests**
   (`tests/test_batch_reservation.py`, 14 tests) using an in-memory
   `sqlite+aiosqlite` engine, matching the fixture pattern already used in
@@ -212,3 +241,56 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   integration coverage for cart/order checkout is expected to still be
   thin/missing (`tests/integration-tests/integration_tests/` has no
   cart or order test files yet).
+- **Expired reservations do not automatically return stock to
+  availability** — this is the one item of
+  `services/order-service/docs/inventory-checkout-contract.md`'s
+  completion checklist that isn't actually satisfied.
+  `InventoryItem.available_quantity` is a plain
+  `on_hand_quantity - reserved_quantity` computation with no expiry
+  awareness, so a reservation past its `expires_at` keeps counting
+  against availability until something explicitly resolves it. The sweep
+  exists (`InventoryService.expire_reservations()` behind
+  `POST /internal/reservations/expire` in `services/inventory-service`,
+  scoped `inventory:expire` per its own `docs/architecture.md`), but
+  nothing calls it: no client is registered for `inventory:expire` in
+  auth-service's service-token registry, and no
+  scheduler/cron/Celery-beat invokes the endpoint anywhere in
+  `docker-compose.yml` or the codebase. There's a *reactive* partial
+  mitigation — `commit_reservation`/`commit_reservation_group` check
+  `_is_expired()` at commit time and resolve to `EXPIRED` instead of
+  committing stale stock — but that only fires if someone later tries to
+  commit that specific reservation; an abandoned cart's hold otherwise
+  sits locked indefinitely. To close this: register an `inventory:expire`
+  client (mirroring how `inventory:sync`/`orders:payment`/
+  `inventory:commit cart:checkout` were added), and add a periodic caller
+  (cron container, Celery beat, or similar) that hits the sweep endpoint.
+- **Inventory's checkout endpoints have no `inventory:checkout` scope —
+  they aren't actually restricted to Order Service.** Verified against
+  the full security/reliability checklist in
+  `services/order-service/docs/inventory-checkout-contract.md`: atomic
+  batch reservations, row-lock oversell prevention, idempotent
+  reserve/commit/release, audit records, transactional outbox events,
+  and seller/active-SKU validation are all implemented as specified, but
+  `/internal/checkout/reservations/batch`, `/{group_id}/commit`, and
+  `/{group_id}/release` (`services/inventory-service/app/routes/inventory.py`)
+  are gated only by `Depends(get_current_principal)` — any valid JWT
+  (buyer, seller, admin, or any service token) can call them, unlike
+  `inventory:sync`/`inventory:expire` which are properly `require_scope`-gated.
+  Practical effect: a buyer's ordinary JWT can call the batch-reserve
+  endpoint directly, skipping Cart/Order's own business rules entirely,
+  and tie up real stock without ever creating an order. Fix: define
+  `inventory:checkout`, register it on order-service's client alongside
+  its existing `inventory:commit cart:checkout`, and gate
+  `create_reservation_batch` with `require_scope("inventory:checkout")`.
+- **Inventory's `OutboxEvent` rows carry no correlation ID.** Unlike
+  order-service's `OutboxEvent` (which has and populates a
+  `correlation_id` column), inventory-service's model
+  (`app/models/reliability.py`) has no such column, and
+  `InventoryService._event()`'s payload dict doesn't include `request_id`
+  either — even though `CorrelationIdMiddleware` already propagates
+  `X-Request-ID` correctly everywhere else (forwarded by order-service on
+  every call, captured on every `AuditLog` row). A future consumer of
+  this outbox (nothing drains it yet) would have no way to trace an event
+  back to its originating request. Fix: add `correlation_id` to
+  `OutboxEvent` and thread `request_id` through `_event()`, mirroring
+  order-service.

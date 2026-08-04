@@ -59,13 +59,30 @@ class Settings(BaseSettings):
     notification_service_timeout_seconds: float = 5.0
 
     # Service-to-service tokens (client credentials, no user session).
-    # Currently a single registered client: Inventory Sync, which needs
-    # the inventory:sync scope to call Inventory's internal catalog
-    # projection endpoint.
+    # Registered clients: Inventory Sync (inventory:sync, to call
+    # Inventory's internal catalog projection endpoint), Payment Service
+    # (orders:payment, to call Order's payment-authorized / payment-failed
+    # callbacks), and Order Service (inventory:commit + cart:checkout, a
+    # space-separated multi-scope grant on one client). inventory:commit
+    # lets Order commit/release Inventory reservations on behalf of a
+    # caller that isn't the buyer — e.g. Payment Service's webhook handler
+    # calling Order's payment-authorized/payment-failed, which must not
+    # have its own orders:payment-scoped token forwarded straight through
+    # to Inventory, which doesn't grant that scope any authority.
+    # cart:checkout lets Order call Cart's internal checked-out callback
+    # after placing an order — Order is always the caller here (never
+    # forwarding someone else's token), it just doesn't have a role/scope
+    # Cart would otherwise accept.
     service_token_expire_minutes: int = 15
     inventory_sync_client_id: str = "inventory-sync-service"
     inventory_sync_client_secret: str = "change-this-in-production-inventory-sync-secret"
     inventory_sync_subject: str = "00000000-0000-0000-0000-000000000001"
+    payment_service_client_id: str = "payment-service"
+    payment_service_client_secret: str = "change-this-in-production-payment-service-secret"
+    payment_service_subject: str = "00000000-0000-0000-0000-000000000002"
+    order_service_client_id: str = "order-service"
+    order_service_client_secret: str = "change-this-in-production-order-service-secret"
+    order_service_subject: str = "00000000-0000-0000-0000-000000000003"
 
     model_config = SettingsConfigDict(
         env_file=".env",

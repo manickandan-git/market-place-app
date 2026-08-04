@@ -45,6 +45,13 @@ uv run pytest -v
 
 - `POST /api/v1/internal/orders/{id}/payment-authorized` — scope `orders:payment`
 - `POST /api/v1/internal/orders/{id}/payment-failed` — scope `orders:payment`
+- `POST /api/v1/internal/orders/{id}/payment-refunded` — scope `orders:payment`.
+  `refunded_amount` is the *cumulative* amount refunded on the payment so
+  far, not just the latest refund — order-service derives
+  `refunded`/`partially_refunded` from that against `grand_total` rather
+  than trusting a status from the caller. Only `payment_status` changes;
+  `Order.status` and the Inventory reservation (already committed at
+  `payment-authorized` time) are untouched.
 - `POST /api/v1/internal/orders/{id}/fulfillment` — scope `orders:fulfillment`
 
 ## Required Inventory checkout contract
@@ -69,6 +76,8 @@ Buyer and service JWTs use RS256/JWKS validation with `kid`, signature, issuer,
 audience, expiry, `nbf`, and `sub`. Payment and Fulfillment callbacks additionally
 require scopes. Never commit tokens or internal API keys.
 
-`ORDER_SERVICE_ACCESS_TOKEN` supports local integration with Cart's existing
-`cart:checkout` endpoint. In production, obtain a short-lived token using Identity
-Service client credentials instead of storing a long-lived token.
+Order calls Cart's `cart:checkout` endpoint (and Inventory's commit/release
+endpoints, for Payment-triggered callbacks) using a short-lived service token
+obtained via Identity's client-credentials grant (`ORDER_SERVICE_CLIENT_ID`/
+`ORDER_SERVICE_CLIENT_SECRET`, cached in `app/auth_client.py`) — there is no
+static long-lived token to configure.

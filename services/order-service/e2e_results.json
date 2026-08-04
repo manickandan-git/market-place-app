@@ -1,0 +1,241 @@
+{
+  "results": [
+    {
+      "name": "health:auth",
+      "status": "PASS",
+      "evidence": "200 {\"status\":\"healthy\",\"service\":\"Marketplace Identity Service\",\"environment\":\"development\"}"
+    },
+    {
+      "name": "health:notification",
+      "status": "PASS",
+      "evidence": "200 {\"status\":\"healthy\",\"service\":\"Marketplace Notification Service\",\"version\":\"0.1.0\",\"timestamp\":\"2026-08-04T19:34:34.0523"
+    },
+    {
+      "name": "health:user",
+      "status": "PASS",
+      "evidence": "200 {\"status\":\"ok\",\"service\":\"marketplace-user-service\",\"environment\":\"development\"}"
+    },
+    {
+      "name": "health:product",
+      "status": "PASS",
+      "evidence": "200 {\"service\":\"product-service\",\"status\":\"healthy\",\"version\":\"1.0.0\"}"
+    },
+    {
+      "name": "health:inventory",
+      "status": "PASS",
+      "evidence": "200 {\"status\":\"ok\",\"service\":\"Marketplace Inventory Service\",\"version\":\"1.0.0\"}"
+    },
+    {
+      "name": "health:cart",
+      "status": "PASS",
+      "evidence": "200 {\"status\":\"ok\",\"service\":\"Marketplace Cart Service\",\"version\":\"1.0.0\"}"
+    },
+    {
+      "name": "health:order",
+      "status": "PASS",
+      "evidence": "200 {\"status\":\"healthy\",\"service\":\"order-service\"}"
+    },
+    {
+      "name": "health:payment",
+      "status": "PASS",
+      "evidence": "200 {\"status\":\"ok\",\"service\":\"Marketplace Payment Service\",\"version\":\"1.0.0\"}"
+    },
+    {
+      "name": "reuse-identity:buyer",
+      "status": "PASS",
+      "evidence": "logged in as buyer.integration@example.com (pre-existing, verified)"
+    },
+    {
+      "name": "reuse-identity:seller",
+      "status": "PASS",
+      "evidence": "logged in as seller.a.integration@example.com (pre-existing, verified)"
+    },
+    {
+      "name": "reuse-identity:admin_src",
+      "status": "PASS",
+      "evidence": "logged in as admin.integration@example.com (pre-existing, verified)"
+    },
+    {
+      "name": "login:all",
+      "status": "PASS",
+      "evidence": "buyer/seller/admin tokens obtained"
+    },
+    {
+      "name": "service-token:inventory-sync",
+      "status": "PASS",
+      "evidence": "200"
+    },
+    {
+      "name": "product:create-category",
+      "status": "PASS",
+      "evidence": "bc8954d6-664d-4c99-9eaa-23c1686b6dec"
+    },
+    {
+      "name": "product:create-product",
+      "status": "PASS",
+      "evidence": "154a322b-f73c-4863-abd1-66e696dffec2"
+    },
+    {
+      "name": "product:publish",
+      "status": "PASS",
+      "evidence": "active"
+    },
+    {
+      "name": "inventory:sku-projection",
+      "status": "PASS",
+      "evidence": "WIDGET-BCDD0C91B2"
+    },
+    {
+      "name": "inventory:create-warehouse",
+      "status": "PASS",
+      "evidence": "c0bd42fc-48f6-4286-b40e-bfac2e7cb596"
+    },
+    {
+      "name": "inventory:add-stock",
+      "status": "PASS",
+      "evidence": "{'id': '2d202a10-24a5-45d6-870a-081e07f3b631', 'warehouse_id': 'c0bd42fc-48f6-4286-b40e-bfac2e7cb596', 'product_id': '154a322b-f73c-4863-abd1-66e696dffec2', 'variant_id': 'f5061394-02fc-4ab4-90c6-642e9b8389b4', 'seller_id': 'b661dda8-9869-4114-aa2d-a347b2a6ecf9', 'sku': 'WIDGET-BCDD0C91B2', 'on_hand_quantity': 50, 'reserved_quantity': 0, 'available_quantity': 50, 'low_stock_threshold': 5, 'is_low_stock': False, 'is_active': True, 'created_at': '2026-08-04T19:34:35.208629Z', 'updated_at': '2026-08-04T19:34:35.208629Z', 'version': 1}"
+    },
+    {
+      "name": "register:fresh-buyer",
+      "status": "PASS",
+      "evidence": "201"
+    },
+    {
+      "name": "verify-email:fresh-buyer",
+      "status": "PASS",
+      "evidence": "200"
+    },
+    {
+      "name": "cart:add-item",
+      "status": "PASS",
+      "evidence": "items=1 version=2"
+    },
+    {
+      "name": "order:checkout",
+      "status": "PASS",
+      "evidence": "status=pending_payment"
+    },
+    {
+      "name": "BUG:cart-marked-checked-out-after-order",
+      "status": "FAIL",
+      "evidence": "cart.status='active' after checkout (expected 'checked_out'); if not fixed, this buyer's cart can never back a second order -- retrying checkout with the same cart_id hits an unhandled 500 IntegrityError on uq_order_customer_cart, not a clean 409"
+    },
+    {
+      "name": "payment:create-intent",
+      "status": "PASS",
+      "evidence": "status=pending has_secret=True"
+    },
+    {
+      "name": "stripe:confirm-payment-intent",
+      "status": "PASS",
+      "evidence": "status=succeeded"
+    },
+    {
+      "name": "webhook:payment-succeeded",
+      "status": "PASS",
+      "evidence": "200 {\"received\":true}"
+    },
+    {
+      "name": "order:payment-authorized-callback",
+      "status": "PASS",
+      "evidence": "status=confirmed payment_status=authorized"
+    },
+    {
+      "name": "payment:partial-refund",
+      "status": "PASS",
+      "evidence": "{'id': '56a08c6b-e287-4e83-9697-f090a306b192', 'payment_id': 'd6be00ee-6bdf-4dce-adc6-f645b5803384', 'provider_refund_id': 're_3U0o6iPAO1Ix6BTP2PEnQ6ej', 'amount': '49.99', 'reason': None, 'status': 'succeeded', 'created_at': '2026-08-04T19:34:39.555399Z'}"
+    },
+    {
+      "name": "order:partial-refund-callback",
+      "status": "PASS",
+      "evidence": "payment_status=partially_refunded status=confirmed"
+    },
+    {
+      "name": "payment:remainder-refund",
+      "status": "PASS",
+      "evidence": "{'id': 'be6d41c3-05ae-479e-9e7a-a412e1c2a28c', 'payment_id': 'd6be00ee-6bdf-4dce-adc6-f645b5803384', 'provider_refund_id': 're_3U0o6iPAO1Ix6BTP2RQhZNmI', 'amount': '49.99', 'reason': None, 'status': 'succeeded', 'created_at': '2026-08-04T19:34:42.036474Z'}"
+    },
+    {
+      "name": "order:full-refund-callback",
+      "status": "PASS",
+      "evidence": "payment_status=refunded status=confirmed"
+    },
+    {
+      "name": "register:fresh-buyer",
+      "status": "PASS",
+      "evidence": "201"
+    },
+    {
+      "name": "verify-email:fresh-buyer",
+      "status": "PASS",
+      "evidence": "200"
+    },
+    {
+      "name": "order:checkout-2",
+      "status": "PASS",
+      "evidence": "pending_payment"
+    },
+    {
+      "name": "webhook:payment-failed",
+      "status": "PASS",
+      "evidence": "200"
+    },
+    {
+      "name": "order:payment-failed-callback",
+      "status": "PASS",
+      "evidence": "status=payment_failed payment_status=failed"
+    },
+    {
+      "name": "inventory:released-after-failure",
+      "status": "PASS",
+      "evidence": "before={'id': '2d202a10-24a5-45d6-870a-081e07f3b631', 'warehouse_id': 'c0bd42fc-48f6-4286-b40e-bfac2e7cb596', 'product_id': '154a322b-f73c-4863-abd1-66e696dffec2', 'variant_id': 'f5061394-02fc-4ab4-90c6-642e9b8389b4', 'seller_id': 'b661dda8-9869-4114-aa2d-a347b2a6ecf9', 'sku': 'WIDGET-BCDD0C91B2', 'on_hand_quantity': 48, 'reserved_quantity': 1, 'available_quantity': 47, 'low_stock_threshold': 5, 'is_low_stock': False, 'is_active': True, 'created_at': '2026-08-04T19:34:35.208629Z', 'updated_at': '2026-08-04T19:34:45.075781Z', 'version': 4} after={'id': '2d202a10-24a5-45d6-870a-081e07f3b631', 'warehouse_id': 'c0bd42fc-48f6-4286-b40e-bfac2e7cb596', 'product_id': '154a322b-f73c-4863-abd1-66e696dffec2', 'variant_id': 'f5061394-02fc-4ab4-90c6-642e9b8389b4', 'seller_id': 'b661dda8-9869-4114-aa2d-a347b2a6ecf9', 'sku': 'WIDGET-BCDD0C91B2', 'on_hand_quantity': 48, 'reserved_quantity': 0, 'available_quantity': 48, 'low_stock_threshold': 5, 'is_low_stock': False, 'is_active': True, 'created_at': '2026-08-04T19:34:35.208629Z', 'updated_at': '2026-08-04T19:34:45.497014Z', 'version': 5}"
+    },
+    {
+      "name": "register:fresh-buyer",
+      "status": "PASS",
+      "evidence": "201"
+    },
+    {
+      "name": "verify-email:fresh-buyer",
+      "status": "PASS",
+      "evidence": "200"
+    },
+    {
+      "name": "order:checkout-3",
+      "status": "PASS",
+      "evidence": "pending_payment"
+    },
+    {
+      "name": "order:cancel",
+      "status": "PASS",
+      "evidence": "cancelled"
+    },
+    {
+      "name": "fulfillment:no-registered-client",
+      "status": "PASS",
+      "evidence": "no client in auth-service's registry carries orders:fulfillment scope (see per-client scopes printed above)"
+    },
+    {
+      "name": "notification:mailpit-not-wired",
+      "status": "PASS",
+      "evidence": "EMAIL_PROVIDER=console is hardcoded in docker-compose.yml (lines 99, 335) for notification-service/worker; Mailpit ('mailer', dev profile) never receives anything regardless of profile -- confirmed 0 messages in Mailpit across the whole run."
+    },
+    {
+      "name": "notification:order-events-emailed",
+      "status": "PASS",
+      "evidence": "0 non-verification console-emails found to buyer (order.created calls NotificationClient.order_event in OrderService.create(); other lifecycle transitions -- payment authorized/failed/refunded, cancel, fulfillment -- do not call the notification client at all, confirmed by reading app/service.py)"
+    }
+  ],
+  "identities": {
+    "buyer": {
+      "email": "buyer.integration@example.com"
+    },
+    "seller": {
+      "email": "seller.a.integration@example.com"
+    },
+    "admin_src": {
+      "email": "admin.integration@example.com"
+    },
+    "inventory_sync": {}
+  }
+}

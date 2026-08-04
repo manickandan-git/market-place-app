@@ -43,6 +43,7 @@ class PaymentStatus(StrEnum):
     CAPTURED = "captured"
     FAILED = "failed"
     REFUNDED = "refunded"
+    PARTIALLY_REFUNDED = "partially_refunded"
 
 
 class Order(Base):

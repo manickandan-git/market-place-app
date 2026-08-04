@@ -1,0 +1,92 @@
+# Full-Platform End-to-End Test Report
+
+**Date:** 2026-08-04
+**Environment:** Local Docker Desktop (Windows), `docker compose up --build -d --profile dev`, all 8 services + 8 Postgres databases + 2 Redis + Mailpit ("mailer", dev profile).
+**Scope requested:** every use case across the full platform — identity, catalog, inventory, cart, checkout, payment (authorize/fail/refund), fulfillment, cancellation, notifications — plus the baseline `tests/integration-tests` suite.
+
+**Outcome: this was a two-attempt run.** Attempt 1 was interrupted by a pre-existing Docker Desktop infrastructure failure (Kubernetes crash-looping on the host, unrelated to this codebase) before the checkout→payment→refund flows could run live. Between attempts, Kubernetes was disabled and Docker Desktop restarted on a clean backend. **Attempt 2 completed successfully**: every use case in scope was exercised live end-to-end, including a real (test-mode) Stripe PaymentIntent confirmation and refund, and the baseline integration suite. **One real application bug was found and confirmed reproducible**: a buyer's cart is never marked checked-out after a successful order, so a second checkout for the same buyer's cart hits an unhandled `500` instead of a clean conflict response (Finding 7). No bug was found in the payment-refund feature itself — every refund scenario (partial, remainder-to-full, cumulative-amount semantics, `Order.status` staying unchanged) behaved exactly as designed against a real Stripe test-mode charge.
+
+## Summary table (attempt 2 — the completed run)
+
+| # | Use case | Result | Evidence |
+|---|---|---|---|
+| 1–8 | Health checks, all 8 services | PASS | All `200` |
+| 9 | Reuse pre-existing verified identities (buyer/seller/admin) | PASS | Logged in as `buyer.integration@example.com`, `seller.a.integration@example.com`, `admin.integration@example.com` — all survived from earlier sessions via the preserved Postgres volume |
+| 10 | Fresh buyer registration + email verification | PASS | `POST /auth/register` → 201; token recovered from notification-worker's console log (Finding 1); `POST /auth/verify-email` → 200 |
+| 11 | `inventory:sync` / `orders:payment` / `inventory:commit` service tokens | PASS | All `200` with correct `scope` claims |
+| 12 | `orders:fulfillment` scope availability | FINDING (platform gap, not a regression) | Still no registered client carries this scope — see Finding 4 |
+| 13 | Admin creates category | PASS | 201 |
+| 14 | Seller creates + publishes product/SKU | PASS | 201, then `status=active` |
+| 15 | SKU projection to Inventory (`inventory:sync`) | PASS | 200, SKU echoed back |
+| 16 | Admin creates warehouse, seller adds stock | PASS | `on_hand=50, reserved=0` |
+| 17 | Buyer adds to cart | PASS | 1 line item, version incremented |
+| 18 | Checkout (`POST /api/v1/orders`) | PASS | `status=pending_payment`, inventory reserved |
+| 19 | **Cart marked checked-out after order** | **FAIL — real bug, Finding 7** | Cart `status` stayed `active` instead of `checked_out` |
+| 20 | Create payment intent | PASS | `status=pending`, Stripe `client_secret` returned |
+| 21 | Confirm PaymentIntent at Stripe (real test-mode API call) | PASS | `status=succeeded` |
+| 22 | Simulated signed Stripe webhook → `payment-authorized` callback | PASS | Order → `status=confirmed`, `payment_status=authorized` |
+| 23 | **Partial refund → `payment-refunded` callback** | **PASS** | Real Stripe refund succeeded; order → `payment_status=partially_refunded`, `status` unchanged (`confirmed`) |
+| 24 | **Remainder refund → fully refunded** | **PASS** | Second real Stripe refund succeeded; order → `payment_status=refunded`, `status` still `confirmed` |
+| 25 | Payment-failure webhook → order `payment_failed`, inventory released | PASS | Reservation released: `reserved_quantity` 1→0, `available_quantity` restored |
+| 26 | Cancellation (`pending_payment` → `cancelled`) | PASS | `status=cancelled` |
+| 27 | Notification/Mailpit check | FINDING (platform gap) | 0 messages ever reached Mailpit — see Finding 1 |
+| 28 | Baseline `tests/integration-tests` suite | PASS | 10 passed, 4 skipped (pre-existing optional-config skips in the kit itself — `INVENTORY_SYNC_ACCESS_TOKEN` / `NOTIFICATION_TEST_ENDPOINT` were never configured; not failures) |
+
+**Tally: 44 PASS, 1 FAIL (a real, reproducible application bug — Finding 7) out of 45 checks in the final run**, plus 3 platform-gap findings that are pre-existing and out of scope for this session's refund feature. The refund flow specifically — the main feature built this session — has **zero bugs found**, now verified against a real Stripe test-mode charge and refund, not just a forged webhook.
+
+## What actually happened, in order
+
+### Attempt 1 (infrastructure failure, see Finding 6)
+Brought the stack up; health checks and identity/scope bootstrap passed, but while proceeding into catalog/checkout, host→container networking began failing across all 8 services simultaneously. Root-caused to Docker Desktop's bundled Kubernetes control plane crash-looping on the host (evidenced by `kube-vpnkit-forwarder`, `kube-apiserver`, `coredns`, `storage-provisioner` all showing repeated recent restarts, unrelated to this project). The failure escalated from host-port-forwarding breaking, to `docker run` failing outright with a raw engine-API `EOF`, to even container-to-container networking timing out universally. Stopped live testing and tore down cleanly (`docker compose down`, no `-v`) with all volumes preserved.
+
+### Attempt 2 (this run)
+1. Kubernetes was disabled on the host and Docker Desktop relaunched on a fresh backend (confirmed: zero `k8s_*` containers, `docker info` responsive immediately).
+2. Brought the stack back up (`docker compose --profile dev up -d --build`); all 8 services + Mailpit healthy within ~8 seconds, and stayed reliably fast and responsive for the rest of the run — confirming the Kubernetes crash-loop was indeed the attempt-1 root cause.
+3. Checked the preserved Postgres volume for reusable identities from prior sessions: `buyer.integration@example.com` / `seller.a.integration@example.com` / `admin.integration@example.com` (the `tests/integration-tests` kit's own default identities) were present and still verified — logged in with these directly rather than re-registering, avoiding unnecessary 409s.
+4. Ran catalog/inventory setup fresh (new category, product, SKU, warehouse, stock) rather than reusing old catalog state, since that's cheap and guarantees a clean, uncoupled starting point for this run.
+5. **First checkout attempt uncovered a real bug** (Finding 7, below): after a successful order, the buyer's cart was never marked `checked_out`, so it can never legitimately back a second order. Worked around it in the test script by using a fresh one-off buyer per checkout flow (documented in-line in the script) so the remaining flows could still be exercised without modifying application code — fixing the bug itself was left for a separate task, per this session's scope.
+6. Discovered and fixed **two bugs in the test script itself** while chasing why fresh-buyer email verification kept timing out: (a) a token-extraction regex could occasionally run past the token into trailing HTML (`...TOKEN</li>`) when it happened to match inside the rendered HTML email body instead of the plaintext one — fixed by restricting the captured charset to the token's actual base64url alphabet; (b) the real cause of the timeouts — `subprocess.run(capture_output=True)` keeps stdout/stderr separate, and the notification-worker's interesting log output is on stderr, so the script was reading an almost-empty stream. Fixed by merging both streams. Neither of these was an application bug.
+7. With those fixed, ran the complete flow live: checkout → real Stripe PaymentIntent creation → **real Stripe test-mode confirmation** (via `pm_card_visa`, no `stripe listen` needed) → signed webhook simulation → order confirmed → **partial refund → full refund**, both real Stripe refund calls, both correctly reflected on the order via the new `payment-refunded` callback. Then a second order exercising the payment-failure webhook path, and a third exercising cancellation — both clean.
+8. Ran the baseline `tests/integration-tests` suite: 10 passed, 4 skipped (pre-existing optional config, unrelated to this session).
+9. Tore down with `docker compose --profile dev down` (no `-v`) — clean, all volumes preserved.
+
+## Findings
+
+**Finding 1 — Mailpit is wired into `docker compose`'s dev profile but never actually used.**
+`EMAIL_PROVIDER=console` is hardcoded for both `marketplace-notification-service` and its Celery worker in `docker-compose.yml` (lines 99 and 335). Mailpit (`mailer`, port 8025) starts successfully under `--profile dev` and is fully reachable, but nothing is ever configured to deliver to it — the notification service just logs the fully-rendered email (subject, HTML, plaintext) to its own container's stdout/stderr instead. Confirmed empirically in both attempts: 0 messages in Mailpit's API across either run. If Mailpit is meant to be the dev-mode email preview tool, `EMAIL_PROVIDER` needs to be `smtp` (or whatever the service calls it) pointed at `mailer:1025` when the dev profile is active — currently it does nothing. A consequence: the only way to complete email verification in this environment is to read the raw console log for `Verification Token: ...`, which is what this test's script does.
+
+**Finding 2 (was "Finding 3" in attempt 1) — No legitimate way to provision the first admin account.**
+`POST /api/v1/auth/register` explicitly blocks `role: ADMIN`, and there is no seed script anywhere in the repo. In attempt 2 this was moot in practice (a pre-existing, already-verified `admin.integration@example.com` survived from an earlier session in the preserved volume), but on a genuinely fresh environment there is still no documented or scripted path to the first admin account — it requires a direct DB `UPDATE`.
+
+**Finding 3 (was "Finding 4") — No client is registered for the `orders:fulfillment` scope.**
+`order-service`'s internal fulfillment endpoint (`POST /api/v1/internal/orders/{id}/fulfillment`) is gated by `require_scope("orders:fulfillment")`, but auth-service's `issue_service_token` registry only has entries for `inventory-sync-service`, `payment-service`, and `order-service`. Nothing can legitimately progress an order through `processing → shipped → delivered` today — a platform gap, not a regression from the refund feature.
+
+**Finding 4 (informational) — `notification-worker` was found OOM-killed once during attempt 1**, before the Kubernetes issue was diagnosed; it may simply have been a casualty of the same host memory pressure. Not observed in attempt 2 (stable and responsive throughout). Still worth noting: this service has no explicit Docker healthcheck, so a crash like this would go unnoticed by `docker compose ps` and messages would queue silently in Redis.
+
+**Finding 5 (infrastructure, RESOLVED) — Docker Desktop's Kubernetes feature was crash-looping and broke networking for the whole stack in attempt 1.**
+Confirmed root cause via `kube-vpnkit-forwarder`/`kube-apiserver`/`coredns`/`storage-provisioner` all showing repeated unexplained restarts. Disabling Kubernetes and relaunching Docker Desktop fully resolved it — attempt 2 had zero networking issues of any kind across ~40 minutes of continuous use. No further action needed; recorded here only so a future reader understands why attempt 1 exists in this file's history.
+
+**Finding 6 — Two bugs in this session's own test tooling** (not application bugs, recorded for completeness since they cost real debugging time): a verification-token regex that could occasionally capture into trailing HTML, and a `subprocess.run` call that silently discarded the notification-worker's stderr-logged output. Both fixed in the test script itself; irrelevant to the shipped application code.
+
+**Finding 7 (RESOLVED) — Real bug: a buyer's cart is never marked checked-out after a successful order, so it can never back a second order.**
+`services/order-service/app/clients.py`, `CartClient.mark_checked_out()`:
+```python
+async def mark_checked_out(self, cart_id, order_id, request_id) -> None:
+    if not self.settings.order_service_access_token:
+        return
+    ...
+```
+This silently no-ops — no exception, no log line — whenever `settings.order_service_access_token` is unset. It is unset in every environment: `ORDER_SERVICE_ACCESS_TOKEN` is not set anywhere in `docker-compose.yml` (only an empty placeholder exists in `services/order-service/.env.example`). Compounding this, `cart-service`'s `POST /internal/carts/{cart_id}/checked-out` endpoint requires a scoped `cart:checkout` token, and **no client is registered for that scope either** — the same gap pattern as Finding 3, but this one has a live, reproducible consequence:
+
+- **Reproduction:** any buyer completes checkout once. Their cart remains `status=active` (confirmed directly via `GET /api/v1/cart`). If that same buyer's cart is used for a second checkout — even indirectly, e.g. adding another item and checking out again — `order-service` attempts to `INSERT` a second `orders` row with the same `(customer_id, cart_id)` pair, which violates the `uq_order_customer_cart` unique constraint. This surfaces as an **unhandled `500 Internal Server Error`** (a raw `IntegrityError` propagating out of `OrderService.create()`), not a clean `409 Conflict`.
+- **Why unit tests didn't catch this:** `tests/test_service.py`'s `FakeCart.mark_checked_out()` always succeeds unconditionally (`self.checked_out = True`), which doesn't model the real no-op behavior — this is exactly the class of bug live E2E testing exists to catch.
+- **This is pre-existing**, not introduced by this session's refund work — `CartClient.mark_checked_out` and its silent-no-op guard predate the payment-service integration.
+- **Fix applied (same session, after this report's first version):** implemented option (b) — `order-service`'s client in auth-service's registry now carries `inventory:commit cart:checkout` (space-separated multi-scope grant on one client, verified the JWT `scope` claim is whitespace-split into a set by every consumer). `CartClient.mark_checked_out` now takes a token parameter and always makes the call; the dead `order_service_access_token` setting/env var was deleted from `app/config.py`, `.env`, and `.env.example` rather than left as an unused fallback. `OrderService.create()` now also does two things: (1) an upfront `by_customer_cart` existence check right after the idempotency check, so a genuine repeat checkout on the same cart fails fast with `409 order_already_exists` before ever reserving inventory a second time, and (2) a defense-in-depth `IntegrityError` handler around the commit for the remaining concurrent-request race window, translating a `uq_order_customer_cart` violation into the same clean `409` instead of a `500`. Verified: the constraint-name string appears in Postgres/asyncpg's error (`duplicate key value violates unique constraint "uq_order_customer_cart"`, confirmed by directly triggering it against a real Postgres 16 container) but *not* in SQLite's (`UNIQUE constraint failed: orders.customer_id, orders.cart_id`, columns only, no constraint name) — the detection checks both message shapes so the race-window test added for this (`test_concurrent_duplicate_checkout_hits_db_constraint_not_500`) actually exercises the same code path in CI (SQLite) as production (Postgres). Two new order-service unit tests added (22 passing total, up from 20); auth-service's 34 tests still pass unchanged. Not yet re-verified live end-to-end against the running stack — the fix was validated via unit tests plus a standalone script confirming the real Postgres constraint-violation message, not a third full E2E run.
+
+## Refund feature verdict
+
+The payment-refund feature built this session is **confirmed correct under live conditions**: real Stripe test-mode PaymentIntent creation, confirmation, and two sequential real refund calls (partial then remainder) all round-tripped correctly through `payment-service` → `order-service`'s new `payment-refunded` callback, landing on `partially_refunded` then `refunded` with `Order.status` correctly left untouched throughout. This matches and extends the confidence already established by the 20 (order-service) + 18 (payment-service) passing unit tests from earlier this session — those covered the logic in isolation; this run confirms the same logic holds with a real payment provider and real HTTP calls between services.
+
+## Teardown
+
+`docker compose --profile dev down` (no `-v`) completed cleanly at the end of attempt 2 — all containers and the compose network were removed. **All named volumes were preserved.**

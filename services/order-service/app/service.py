@@ -5,9 +5,11 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import Principal
+from app.auth_client import AuthClient
 from app.clients import CartClient, InventoryClient, NotificationClient, ProductClient
 from app.config import Settings
 from app.exceptions import ServiceError
@@ -30,6 +32,7 @@ from app.schemas import (
     OrderCreate,
     PaymentAuthorized,
     PaymentFailed,
+    PaymentRefunded,
 )
 
 
@@ -42,6 +45,7 @@ class OrderService:
         products: ProductClient,
         inventory: InventoryClient,
         notifications: NotificationClient,
+        auth_client: AuthClient | None = None,
     ):
         self.session = session
         self.settings = settings
@@ -50,6 +54,7 @@ class OrderService:
         self.products = products
         self.inventory = inventory
         self.notifications = notifications
+        self.auth_client = auth_client
 
     async def create(
         self,
@@ -71,6 +76,11 @@ class OrderService:
             order = await self.repo.get(previous.resource_id)
             if order:
                 return order
+
+        if await self.repo.by_customer_cart(principal.subject, data.cart_id):
+            raise ServiceError(
+                409, "order_already_exists", "An order already exists for this cart"
+            )
 
         cart = await self.cart.snapshot(
             data.cart_id, data.cart_version, access_token, request_id
@@ -162,6 +172,31 @@ class OrderService:
         self._audit(order, str(principal.subject), "order.create", request_id)
         try:
             await self.session.commit()
+        except IntegrityError as exc:
+            # Defense-in-depth against the upfront by_customer_cart check
+            # above: a concurrent request for the same cart can still race
+            # past it and hit the DB constraint instead. Translate that
+            # specific race into the same clean 409 rather than a 500;
+            # anything else is a genuine persistence failure.
+            await self.session.rollback()
+            await self.inventory.release_group(
+                reservation.reservation_group_id,
+                "Order persistence failed",
+                access_token,
+                request_id,
+            )
+            orig_message = str(getattr(exc, "orig", exc))
+            # Postgres/asyncpg names the constraint in the message; SQLite
+            # (used in tests) only lists the columns instead — check both
+            # so this is exercised the same way in tests as in production.
+            if (
+                "uq_order_customer_cart" in orig_message
+                or "orders.customer_id, orders.cart_id" in orig_message
+            ):
+                raise ServiceError(
+                    409, "order_already_exists", "An order already exists for this cart"
+                ) from exc
+            raise
         except Exception:
             await self.session.rollback()
             await self.inventory.release_group(
@@ -173,7 +208,9 @@ class OrderService:
             raise
         await self.session.refresh(order)
         try:
-            await self.cart.mark_checked_out(cart.id, order.id, request_id)
+            await self.cart.mark_checked_out(
+                cart.id, order.id, await self._service_token(access_token), request_id
+            )
         except ServiceError:
             # order.created remains in the outbox for a retrying integration worker.
             pass
@@ -250,7 +287,10 @@ class OrderService:
             )
         if order.reservation_group_id:
             await self.inventory.commit_group(
-                order.reservation_group_id, order.order_number, access_token, request_id
+                order.reservation_group_id,
+                order.order_number,
+                await self._service_token(access_token),
+                request_id,
             )
         order.payment_status = PaymentStatus.AUTHORIZED
         order.payment_reference = data.payment_reference
@@ -282,7 +322,10 @@ class OrderService:
             )
         if order.reservation_group_id:
             await self.inventory.release_group(
-                order.reservation_group_id, data.reason, access_token, request_id
+                order.reservation_group_id,
+                data.reason,
+                await self._service_token(access_token),
+                request_id,
             )
         order.payment_status = PaymentStatus.FAILED
         order.payment_reference = data.payment_reference
@@ -293,6 +336,52 @@ class OrderService:
             data.reason,
             request_id,
         )
+        await self.session.commit()
+        await self.session.refresh(order)
+        return order
+
+    async def payment_refunded(
+        self,
+        order_id: UUID,
+        data: PaymentRefunded,
+        principal: Principal,
+        request_id: str | None,
+    ) -> Order:
+        """A refund never changes Order.status (fulfillment keeps running
+        independently of a post-hoc refund) or the Inventory reservation
+        (already committed at payment_authorized time) — only
+        payment_status moves. `data.refunded_amount` is the cumulative
+        total refunded on the payment so far, so re-deriving REFUNDED vs.
+        PARTIALLY_REFUNDED here is naturally idempotent: replaying the same
+        cumulative amount always lands on the same status."""
+        order = await self._locked(order_id)
+        if order.payment_status not in {
+            PaymentStatus.AUTHORIZED,
+            PaymentStatus.CAPTURED,
+            PaymentStatus.REFUNDED,
+            PaymentStatus.PARTIALLY_REFUNDED,
+        }:
+            raise ServiceError(
+                409, "invalid_order_state", "Order has no successful payment to refund"
+            )
+        if data.currency_code != order.currency_code:
+            raise ServiceError(
+                422, "payment_amount_mismatch", "Refund currency does not match order"
+            )
+        if data.refunded_amount > order.grand_total:
+            raise ServiceError(
+                422,
+                "payment_amount_mismatch",
+                "Refunded amount exceeds the order's grand total",
+            )
+        order.payment_status = (
+            PaymentStatus.REFUNDED
+            if data.refunded_amount == order.grand_total
+            else PaymentStatus.PARTIALLY_REFUNDED
+        )
+        order.version += 1
+        self._event(order, "order.payment_refunded", request_id)
+        self._audit(order, str(principal.subject), "order.payment_refunded", request_id)
         await self.session.commit()
         await self.session.refresh(order)
         return order
@@ -324,6 +413,24 @@ class OrderService:
         await self.session.commit()
         await self.session.refresh(order)
         return order
+
+    async def _service_token(self, fallback: str) -> str:
+        """Token used for internal calls order-service makes with its own
+        authority rather than forwarding the caller's token: Inventory's
+        commit/release endpoints (needs inventory:commit) and Cart's
+        checked-out callback (needs cart:checkout). The caller's own
+        bearer token (`fallback`) never carries either scope — forwarding
+        it is only correct for calls the buyer is *directly* authorized to
+        make (e.g. reserving/releasing their own cart's inventory during
+        checkout itself). It's wrong for payment_authorized/payment_failed,
+        called by Payment Service's orders:payment-scoped token, which
+        grants nothing on Inventory. `auth_client` is optional so tests can
+        keep constructing `OrderService` without it and passing whatever
+        token they need forwarded.
+        """
+        if self.auth_client is None:
+            return fallback
+        return await self.auth_client.service_token()
 
     async def _locked(self, order_id: UUID) -> Order:
         order = await self.repo.get(order_id, lock=True)

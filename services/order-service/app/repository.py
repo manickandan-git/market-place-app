@@ -23,6 +23,13 @@ class OrderRepository:
             select(Order).where(Order.order_number == order_number)
         )
 
+    async def by_customer_cart(self, customer_id: UUID, cart_id: UUID) -> Order | None:
+        return await self.session.scalar(
+            select(Order).where(
+                Order.customer_id == customer_id, Order.cart_id == cart_id
+            )
+        )
+
     async def list_for_customer(
         self, customer_id: UUID, page: int, page_size: int
     ) -> tuple[list[Order], int]:

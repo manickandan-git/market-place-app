@@ -709,6 +709,16 @@ async def issue_service_token(
             settings.inventory_sync_subject,
             "inventory:sync",
         ),
+        settings.payment_service_client_id: (
+            settings.payment_service_client_secret,
+            settings.payment_service_subject,
+            "orders:payment",
+        ),
+        settings.order_service_client_id: (
+            settings.order_service_client_secret,
+            settings.order_service_subject,
+            "inventory:commit cart:checkout",
+        ),
     }
 
     invalid_client = HTTPException(

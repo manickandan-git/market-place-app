@@ -18,6 +18,7 @@ from app.schemas import (
     OrderCreate,
     PaymentAuthorized,
     PaymentFailed,
+    PaymentRefunded,
 )
 from app.service import OrderService
 
@@ -26,12 +27,14 @@ class FakeCart:
     def __init__(self, cart: CartSnapshot):
         self.cart = cart
         self.checked_out = False
+        self.checked_out_token: str | None = None
 
     async def snapshot(self, *_args):
         return self.cart
 
-    async def mark_checked_out(self, *_args):
+    async def mark_checked_out(self, cart_id, order_id, token, request_id):
         self.checked_out = True
+        self.checked_out_token = token
 
 
 class FakeProducts:
@@ -144,6 +147,47 @@ async def test_create_order_reserves_inventory_and_is_idempotent(
     assert len(order.items) == 1
     assert inventory.reserved
     assert carts.checked_out
+    assert carts.checked_out_token == "buyer-token"
+
+
+@pytest.mark.asyncio
+async def test_second_checkout_of_same_cart_is_rejected(
+    session, customer_id, principal, create_data
+):
+    service, _, inventory = build_service(session, customer_id, create_data)
+    await service.create(create_data, principal, "token", "checkout-key-a", None)
+    inventory.reserved = False
+
+    with pytest.raises(ServiceError) as exc:
+        await service.create(create_data, principal, "token", "checkout-key-b", None)
+    assert exc.value.code == "order_already_exists"
+    # Rejected by the upfront by_customer_cart check, before ever asking
+    # Inventory to reserve stock a second time for the same cart.
+    assert not inventory.reserved
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_checkout_hits_db_constraint_not_500(
+    session, customer_id, principal, create_data
+):
+    """Simulates the race the upfront by_customer_cart check can't close:
+    a second request's read of by_customer_cart happens before the first
+    request's transaction commits, so both proceed to insert. The DB's
+    unique constraint is the real backstop; this pins that it surfaces as
+    a clean 409, not an unhandled 500."""
+    service, _, inventory = build_service(session, customer_id, create_data)
+    await service.create(create_data, principal, "token", "checkout-key-e", None)
+    inventory.reserved = False
+
+    async def _stale_read(*_args):
+        return None
+
+    service.repo.by_customer_cart = _stale_read
+
+    with pytest.raises(ServiceError) as exc:
+        await service.create(create_data, principal, "token", "checkout-key-f", None)
+    assert exc.value.code == "order_already_exists"
+    assert inventory.released
 
 
 @pytest.mark.asyncio
@@ -197,6 +241,139 @@ async def test_payment_failure_releases_inventory(
     )
     assert updated.status == OrderStatus.PAYMENT_FAILED
     assert inventory.released
+
+
+async def _authorized_order(service, customer_id, principal, create_data, key):
+    order = await service.create(create_data, principal, "token", key, None)
+    payment = Principal(uuid4(), frozenset(), frozenset({"orders:payment"}), {})
+    return await service.payment_authorized(
+        order.id,
+        PaymentAuthorized(
+            payment_reference="pay-1",
+            authorized_amount=Decimal("39.98"),
+            currency_code="USD",
+        ),
+        payment,
+        "service-token",
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_full_refund_marks_order_refunded_without_changing_status(
+    session, customer_id, principal, create_data
+):
+    service, _, _ = build_service(session, customer_id, create_data)
+    order = await _authorized_order(
+        service, customer_id, principal, create_data, "refund-key-1"
+    )
+    payment = Principal(uuid4(), frozenset(), frozenset({"orders:payment"}), {})
+
+    refunded = await service.payment_refunded(
+        order.id,
+        PaymentRefunded(refunded_amount=Decimal("39.98"), currency_code="USD"),
+        payment,
+        None,
+    )
+
+    assert refunded.payment_status == PaymentStatus.REFUNDED
+    assert refunded.status == OrderStatus.CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_partial_refund_marks_order_partially_refunded(
+    session, customer_id, principal, create_data
+):
+    service, _, _ = build_service(session, customer_id, create_data)
+    order = await _authorized_order(
+        service, customer_id, principal, create_data, "refund-key-2"
+    )
+    payment = Principal(uuid4(), frozenset(), frozenset({"orders:payment"}), {})
+
+    refunded = await service.payment_refunded(
+        order.id,
+        PaymentRefunded(refunded_amount=Decimal("10.00"), currency_code="USD"),
+        payment,
+        None,
+    )
+
+    assert refunded.payment_status == PaymentStatus.PARTIALLY_REFUNDED
+    assert refunded.status == OrderStatus.CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_refund_replay_with_same_amount_is_idempotent(
+    session, customer_id, principal, create_data
+):
+    service, _, _ = build_service(session, customer_id, create_data)
+    order = await _authorized_order(
+        service, customer_id, principal, create_data, "refund-key-3"
+    )
+    payment = Principal(uuid4(), frozenset(), frozenset({"orders:payment"}), {})
+    data = PaymentRefunded(refunded_amount=Decimal("39.98"), currency_code="USD")
+
+    first = await service.payment_refunded(order.id, data, payment, None)
+    replay = await service.payment_refunded(order.id, data, payment, None)
+
+    assert first.payment_status == replay.payment_status == PaymentStatus.REFUNDED
+
+
+@pytest.mark.asyncio
+async def test_refund_rejects_unpaid_order(
+    session, customer_id, principal, create_data
+):
+    service, _, _ = build_service(session, customer_id, create_data)
+    order = await service.create(create_data, principal, "token", "refund-key-4", None)
+    payment = Principal(uuid4(), frozenset(), frozenset({"orders:payment"}), {})
+
+    with pytest.raises(ServiceError) as exc:
+        await service.payment_refunded(
+            order.id,
+            PaymentRefunded(refunded_amount=Decimal("10.00"), currency_code="USD"),
+            payment,
+            None,
+        )
+    assert exc.value.code == "invalid_order_state"
+
+
+@pytest.mark.asyncio
+async def test_refund_rejects_currency_mismatch(
+    session, customer_id, principal, create_data
+):
+    service, _, _ = build_service(session, customer_id, create_data)
+    order = await _authorized_order(
+        service, customer_id, principal, create_data, "refund-key-5"
+    )
+    payment = Principal(uuid4(), frozenset(), frozenset({"orders:payment"}), {})
+
+    with pytest.raises(ServiceError) as exc:
+        await service.payment_refunded(
+            order.id,
+            PaymentRefunded(refunded_amount=Decimal("10.00"), currency_code="EUR"),
+            payment,
+            None,
+        )
+    assert exc.value.code == "payment_amount_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_refund_rejects_amount_exceeding_grand_total(
+    session, customer_id, principal, create_data
+):
+    service, _, _ = build_service(session, customer_id, create_data)
+    order = await _authorized_order(
+        service, customer_id, principal, create_data, "refund-key-6"
+    )
+    payment = Principal(uuid4(), frozenset(), frozenset({"orders:payment"}), {})
+
+    with pytest.raises(ServiceError) as exc:
+        await service.payment_refunded(
+            order.id,
+            PaymentRefunded(refunded_amount=Decimal("100.00"), currency_code="USD"),
+            payment,
+            None,
+        )
+    assert exc.value.code == "payment_amount_mismatch"
 
 
 @pytest.mark.asyncio
