@@ -19,3 +19,9 @@ test_auth.db
 test-results/
 *.pyc
 .git
+
+# Node / Next.js (apps/web)
+node_modules/
+.next/
+.env.local
+next-env.d.ts
