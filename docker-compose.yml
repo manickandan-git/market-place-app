@@ -469,11 +469,64 @@ services:
       marketplace-order-service:
         condition: service_started
 
+  # 22. The Shipping Service Database
+  marketplace-shipping-db:
+    image: postgres:16-alpine
+    container_name: marketplace-shipping-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=shipping_service
+    ports:
+      - "5441:5432"
+    volumes:
+      - marketplace_shipping_service_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d shipping_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 23. The Shipping Service (API)
+  marketplace-shipping-service:
+    build:
+      context: ./services/shipping-service
+      dockerfile: Dockerfile
+    ports:
+      - "8009:8009"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-shipping-db:5432/shipping_service
+      # JWT_ISSUER is a literal string compared against the access token's
+      # "iss" claim, which auth-service bakes in from its own JWT_ISSUER
+      # setting (http://localhost:8001) — this must match that value exactly
+      # and is NOT a network address, unlike JWT_JWKS_URL below.
+      - JWT_ISSUER=http://localhost:8001
+      - JWT_AUDIENCE=marketplace-api
+      - JWT_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      - AUTH_SERVICE_URL=http://marketplace-auth-service:8001
+      - ORDER_SERVICE_URL=http://marketplace-order-service:8007
+      - SHIPPING_SERVICE_CLIENT_ID=shipping-service
+      - SHIPPING_SERVICE_CLIENT_SECRET=SnGj15ttn_BWjxFmzT_nGZuk1CGC-ceetkDinW5Gg84
+      - CORS_ORIGINS=["http://localhost:3000"]
+    volumes:
+      - ./services/shipping-service/app:/app/app
+      - ./services/shipping-service/alembic:/app/alembic
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8009 --reload"
+    depends_on:
+      marketplace-shipping-db:
+        condition: service_healthy
+      marketplace-auth-service:
+        condition: service_started
+      marketplace-order-service:
+        condition: service_started
+
 # Named volumes block tells Docker where to store the database files on your host machine safely
 volumes:
   marketplace_auth_service_postgres_data:
   marketplace_notification_service_postgres_data:
   marketplace_payment_service_postgres_data:
+  marketplace_shipping_service_postgres_data:
   marketplace_user_service_postgres_data:
   marketplace_product_service_postgres_data:
   marketplace_inventory_service_postgres_data:

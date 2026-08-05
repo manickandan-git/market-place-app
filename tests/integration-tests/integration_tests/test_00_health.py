@@ -15,6 +15,10 @@ pytestmark = pytest.mark.integration
         ("product_service_url", "product_health_path"),
         ("inventory_service_url", "inventory_health_path"),
         ("notification_service_url", "notification_health_path"),
+        ("cart_service_url", "cart_health_path"),
+        ("order_service_url", "order_health_path"),
+        ("payment_service_url", "payment_health_path"),
+        ("shipping_service_url", "shipping_health_path"),
     ],
 )
 async def test_service_is_healthy(settings, base_attribute, path_attribute):

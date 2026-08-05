@@ -82,6 +82,10 @@ class MarketplaceClients:
             settings.notification_service_url,
             **options,
         )
+        self.cart = ServiceClient(settings.cart_service_url, **options)
+        self.order = ServiceClient(settings.order_service_url, **options)
+        self.payment = ServiceClient(settings.payment_service_url, **options)
+        self.shipping = ServiceClient(settings.shipping_service_url, **options)
 
     async def close(self) -> None:
         await self.auth.close()
@@ -89,4 +93,8 @@ class MarketplaceClients:
         await self.product.close()
         await self.inventory.close()
         await self.notification.close()
+        await self.cart.close()
+        await self.order.close()
+        await self.payment.close()
+        await self.shipping.close()
 

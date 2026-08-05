@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # after placing an order — Order is always the caller here (never
     # forwarding someone else's token), it just doesn't have a role/scope
     # Cart would otherwise accept.
+    # Shipping Service (orders:fulfillment, to call Order's existing
+    # internal fulfillment callback as a shipment moves through
+    # processing/shipped/delivered).
     service_token_expire_minutes: int = 15
     inventory_sync_client_id: str = "inventory-sync-service"
     inventory_sync_client_secret: str = "change-this-in-production-inventory-sync-secret"
@@ -83,6 +86,11 @@ class Settings(BaseSettings):
     order_service_client_id: str = "order-service"
     order_service_client_secret: str = "change-this-in-production-order-service-secret"
     order_service_subject: str = "00000000-0000-0000-0000-000000000003"
+    shipping_service_client_id: str = "shipping-service"
+    shipping_service_client_secret: str = (
+        "shipping-service-secret-12345"
+    )
+    shipping_service_subject: str = "00000000-0000-0000-0000-000000000004"
 
     model_config = SettingsConfigDict(
         env_file=".env",

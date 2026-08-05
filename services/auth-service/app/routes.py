@@ -719,6 +719,11 @@ async def issue_service_token(
             settings.order_service_subject,
             "inventory:commit cart:checkout",
         ),
+        settings.shipping_service_client_id: (
+            settings.shipping_service_client_secret,
+            settings.shipping_service_subject,
+            "orders:fulfillment",
+        ),
     }
 
     invalid_client = HTTPException(

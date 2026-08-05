@@ -20,6 +20,7 @@ is a separate `uv` project that exercises the running services over real HTTP.
 | cart-service | 8006 | Shopping intent and current price snapshots |
 | order-service | 8007 | Checkout order snapshots and order lifecycle |
 | payment-service | 8008 | Stripe payment authorization, capture, and refunds |
+| shipping-service | 8009 | Shipment records, carrier/tracking info, drives Order's fulfillment callback |
 
 `auth-service` (the Identity Service) is the sole authority for credentials,
 roles, sessions, and JWT issuance. Every other service validates
@@ -216,6 +217,30 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   same fix order-service already uses for `Order.items`. If you add a new
   relationship anywhere and read it from a plain (non-async) property or
   method, eager-load it the same way rather than relying on lazy load.
+- **Shipping service now exists** (`services/shipping-service`, port 8009).
+  It owns `Shipment`/`ShipmentEvent` rows (carrier, tracking number,
+  manual tracking history — no real carrier integration; tracking numbers
+  are entered by hand) and drives order-service's *existing*
+  `POST /api/v1/internal/orders/{id}/fulfillment` callback as a shipment
+  moves `pending → shipped → delivered`, mirroring exactly how
+  payment-service drives `payment-authorized`/`payment-failed` without
+  ever writing to Order's database directly. Creating a shipment calls
+  Order's callback with `processing` *before* the local `Shipment` row is
+  persisted, so a rejected transition (order not `confirmed` yet) never
+  leaves an orphan shipment. A `FAILED` shipment (carrier exception) is
+  recorded locally only — Order's fulfillment machine only moves forward
+  and has no state for a shipping failure. auth-service was extended with
+  a `shipping-service` client-credentials registration (`orders:fulfillment`
+  scope) to support this — this is the fix for the "no client registered
+  for `orders:fulfillment`" gap the E2E test run found earlier. Full
+  scoping notes are in
+  `services/order-service/docs/shipping-service-scope.md`, including the
+  open question it doesn't resolve: order-service has no seller-facing
+  read endpoint, so Shipping can't independently verify a seller actually
+  owns line items on an order before creating a shipment for it — it
+  inherits the same trust boundary Order's own fulfillment endpoint
+  already has (any `orders:fulfillment`-scoped caller can advance any
+  order).
 - **`services/inventory-service` now has DB-backed async unit tests**
   (`tests/test_batch_reservation.py`, 14 tests) using an in-memory
   `sqlite+aiosqlite` engine, matching the fixture pattern already used in
@@ -234,13 +259,10 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   `NOTIFICATION_TEST_ENDPOINT` rather than hardcoded — check
   `tests/integration-tests/integration_tests/test_40_notification.py` and
   the kit's README before assuming the endpoint path is correct.
-- Per the integration-tests README, Cart Service work was meant to begin
-  only after the five original services (auth/notification/user/product/
-  inventory) pass the full integration suite repeatedly from a clean
-  environment — cart-service and order-service were added afterward, so
-  integration coverage for cart/order checkout is expected to still be
-  thin/missing (`tests/integration-tests/integration_tests/` has no
-  cart or order test files yet).
+- **`tests/integration-tests` now has cart/order/payment/shipping checkout
+  workflow coverage** (`test_50_cart.py` through `test_80_shipping.py`),
+  closing the gap this bullet used to describe. Writing it surfaced the
+  `mark_checked_out` bug documented below.
 - **Expired reservations do not automatically return stock to
   availability** — this is the one item of
   `services/order-service/docs/inventory-checkout-contract.md`'s
@@ -294,3 +316,41 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   back to its originating request. Fix: add `correlation_id` to
   `OutboxEvent` and thread `request_id` through `_event()`, mirroring
   order-service.
+- **A buyer's cart is never actually retired after checkout — `mark_checked_out`
+  always fails with `403 customer_context_required`, silently.**
+  `services/cart-service/app/routes/cart.py`'s
+  `POST /internal/carts/{cart_id}/checked-out` reads
+  `principal.claims.get("customer_id")` from the caller's JWT and rejects
+  the call if it's absent. No token order-service can obtain has this claim:
+  `ServiceTokenRequest` (`services/auth-service/app/schemas.py`,
+  client-credentials grant) only accepts `client_id`/`client_secret`, with
+  no way to embed a per-request `customer_id`. Reproduction: mint an
+  order-service client-credentials token (scope correctly comes back as
+  `inventory:commit cart:checkout`), `POST` it to that endpoint with a real
+  `order_id` → `403 {"error":{"code":"customer_context_required",...}}`.
+  `OrderService.create()` wraps the call in `except ServiceError: pass`, so
+  order creation still returns `201` and the failure is invisible unless
+  something checks the cart's status afterward — which is exactly what
+  `tests/integration-tests/integration_tests/conftest.py`'s
+  `checkout_retires_cart` probe fixture now does (it performs one real
+  checkout, confirms the cart didn't get retired, and skips every
+  dependent test with this explanation, mirroring the `inventory_sync`
+  skip pattern already in the kit). Practical effect in production: a
+  buyer's cart stays `ACTIVE` forever, so **no buyer can ever complete a
+  second checkout** — every later attempt permanently collides with
+  order-service's `uq_order_customer_cart` constraint (not conditional on
+  order status, so even a cancelled/failed prior order still blocks reuse
+  of that `(customer_id, cart_id)` pair) and returns `409
+  order_already_exists`. This is a distinct, deeper bug from the
+  `cart:checkout` scope-registration gap fixed earlier — that fix was
+  necessary but not sufficient. Candidate fixes: (a) let
+  `ServiceTokenRequest` accept a verified, scope-gated `customer_id`/context
+  field embedded as a claim only for pre-approved scopes (needs care
+  against a compromised caller impersonating an arbitrary customer); (b)
+  pass `customer_id` in `MarkCheckedOutRequest`'s body instead — order-service
+  already knows it from its own `Order` row — with cart-service verifying
+  it against the cart's actual owner column (smaller change, matches how
+  `inventory-service`'s `commit`/`release` endpoints already trust scope
+  alone with no per-actor claim delegation); (c) drop the check entirely,
+  same rationale as (b) minus the extra verification. Full writeup in
+  `docs/e2e-platform-test-report.md`'s Finding 7.

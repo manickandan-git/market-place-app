@@ -26,6 +26,9 @@
 		},
 		{
 			"path": "../services/payment-service"
+		},
+		{
+			"path": "../services/shipping-service"
 		}
 	],
 	"settings": {

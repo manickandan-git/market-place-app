@@ -15,17 +15,25 @@ class Settings(BaseSettings):
     )
 
     auth_service_url: str = "http://localhost:8001"
-    user_service_url: str = "http://localhost:8002"
-    product_service_url: str = "http://localhost:8003"
-    inventory_service_url: str = "http://localhost:8004"
-    notification_service_url: str = "http://localhost:8005"
+    notification_service_url: str = "http://localhost:8002"
+    user_service_url: str = "http://localhost:8003"
+    product_service_url: str = "http://localhost:8004"
+    inventory_service_url: str = "http://localhost:8005"
+    cart_service_url: str = "http://localhost:8006"
+    order_service_url: str = "http://localhost:8007"
+    payment_service_url: str = "http://localhost:8008"
+    shipping_service_url: str = "http://localhost:8009"
 
     auth_health_path: str = "/health"
     auth_jwks_path: str = "/.well-known/jwks.json"
-    user_health_path: str = "/health/live"
+    notification_health_path: str = "/health"
+    user_health_path: str = "/api/v1/health/live"
     product_health_path: str = "/health"
     inventory_health_path: str = "/health"
-    notification_health_path: str = "/health"
+    cart_health_path: str = "/health"
+    order_health_path: str = "/health"
+    payment_health_path: str = "/health"
+    shipping_health_path: str = "/health"
 
     jwt_issuer: str = "http://localhost:8001"
     jwt_audience: str = "marketplace-api"
@@ -53,6 +61,12 @@ class Settings(BaseSettings):
     internal_api_key: str | None = None
     notification_test_endpoint: str | None = None
     notification_api_key_header: str = "X-Internal-API-Key"
+
+    # Must match payment-service's STRIPE_WEBHOOK_SECRET so the suite can
+    # sign synthetic Stripe events and POST them directly to
+    # /api/v1/webhooks/stripe — this is exactly what docker-compose.yml's
+    # fixed dev-only secret exists for (no `stripe listen` needed).
+    stripe_webhook_secret: str = "whsec_dev_only_e2e_workflow_test_secret"
 
     http_timeout_seconds: float = 20
     startup_timeout_seconds: float = 90

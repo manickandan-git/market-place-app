@@ -24,11 +24,14 @@ Product, and Inventory services.
 | Service | Port |
 |---|---:|
 | Auth | 8001 |
-| User | 8002 |
-| Notification | 8003 |
+| Notification | 8002 |
+| User | 8003 |
 | Product | 8004 |
 | Inventory | 8005 |
 | Cart | 8006 |
+| Order | 8007 |
+| Payment | 8008 |
+| Shipping | 8009 |
 | Cart PostgreSQL | 5438 |
 
 Adjust the ports in `.env` if your current service layout differs.
