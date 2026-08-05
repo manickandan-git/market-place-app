@@ -29,6 +29,9 @@
 		},
 		{
 			"path": "../services/shipping-service"
+		},
+		{
+			"path": "../services/api-gateway"
 		}
 	],
 	"settings": {

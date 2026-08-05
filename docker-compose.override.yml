@@ -1,0 +1,75 @@
+# Local-development port publishing only.
+#
+# Auto-loaded by plain `docker compose up` (Compose merges any
+# docker-compose.override.yml alongside docker-compose.yml with no -f flags
+# needed) — this keeps the existing day-to-day dev workflow completely
+# unchanged. docker-compose.yml itself publishes no host ports for any
+# internal service or database on purpose (only the API gateway's 9000 is
+# published there), so that `docker compose -f docker-compose.yml up` alone
+# demonstrates the production-safe topology: only the gateway is reachable
+# from outside the Docker network, every other service and database is
+# reachable only by other containers on it.
+#
+# Keep this file narrowly scoped to port publishing. Don't add JWT/env var
+# overrides or other config here — those belong in docker-compose.yml.
+services:
+  marketplace-auth-db:
+    ports:
+      - "5433:5432"
+  marketplace-auth-service:
+    ports:
+      - "8001:8001"
+  marketplace-auth-redis:
+    ports:
+      - "6380:6379"
+  marketplace-notification-db:
+    ports:
+      - "5434:5432"
+  marketplace-notification-redis:
+    ports:
+      - "6381:6379"
+  marketplace-notification-service:
+    ports:
+      - "8002:8002"
+  marketplace-user-db:
+    ports:
+      - "5435:5432"
+  marketplace-user-service:
+    ports:
+      - "8003:8003"
+  marketplace-product-db:
+    ports:
+      - "5436:5432"
+  marketplace-product-service:
+    ports:
+      - "8004:8004"
+  marketplace-inventory-db:
+    ports:
+      - "5437:5432"
+  marketplace-inventory-service:
+    ports:
+      - "8005:8005"
+  marketplace-cart-db:
+    ports:
+      - "5438:5432"
+  marketplace-cart-service:
+    ports:
+      - "8006:8006"
+  marketplace-order-db:
+    ports:
+      - "5439:5432"
+  marketplace-order-service:
+    ports:
+      - "8007:8007"
+  marketplace-payment-db:
+    ports:
+      - "5440:5432"
+  marketplace-payment-service:
+    ports:
+      - "8008:8008"
+  marketplace-shipping-db:
+    ports:
+      - "5441:5432"
+  marketplace-shipping-service:
+    ports:
+      - "8009:8009"
