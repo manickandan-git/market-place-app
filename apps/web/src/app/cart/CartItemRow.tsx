@@ -11,7 +11,13 @@ import { initialCartActionState } from "@/lib/actions/cart-state";
 import type { CartItem } from "@/lib/api/cart";
 import { formatPrice } from "@/lib/format";
 
-export function CartItemRow({ item }: { item: CartItem }) {
+export function CartItemRow({
+  item,
+  cartVersion,
+}: {
+  item: CartItem;
+  cartVersion: number;
+}) {
   const [updateState, updateAction, updatePending] = useActionState(
     updateQuantityAction,
     initialCartActionState,
@@ -58,7 +64,7 @@ export function CartItemRow({ item }: { item: CartItem }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <form action={updateAction} className="flex items-center gap-2">
           <input type="hidden" name="item_id" value={item.id} />
-          <input type="hidden" name="version" value={item.version} />
+          <input type="hidden" name="version" value={cartVersion} />
           <label htmlFor={`qty-${item.id}`} className="sr-only">
             Quantity
           </label>
@@ -82,7 +88,7 @@ export function CartItemRow({ item }: { item: CartItem }) {
 
         <form action={saveAction}>
           <input type="hidden" name="item_id" value={item.id} />
-          <input type="hidden" name="version" value={item.version} />
+          <input type="hidden" name="version" value={cartVersion} />
           <button
             type="submit"
             disabled={savePending}
@@ -94,7 +100,7 @@ export function CartItemRow({ item }: { item: CartItem }) {
 
         <form action={removeAction}>
           <input type="hidden" name="item_id" value={item.id} />
-          <input type="hidden" name="version" value={item.version} />
+          <input type="hidden" name="version" value={cartVersion} />
           <button
             type="submit"
             disabled={removePending}

@@ -239,18 +239,14 @@ async def mark_checked_out(
     principal: CheckoutPrincipal,
     service: Service,
 ):
-    raw_customer_id = principal.claims.get("customer_id")
-    if not raw_customer_id:
-        from app.exceptions import ServiceError
-
-        raise ServiceError(
-            403,
-            "customer_context_required",
-            "Service token must include customer_id",
-        )
-    customer_id = UUID(str(raw_customer_id))
+    # principal (the cart:checkout-scoped service token) only proves the
+    # caller is a trusted service, not which customer's cart to retire —
+    # that comes from the request body. CartService.mark_checked_out still
+    # verifies data.customer_id against the cart's own customer_id column
+    # before doing anything, so a caller can't retire a cart it doesn't
+    # name correctly.
     cart = await service.mark_checked_out(
-        cart_id, customer_id, data.order_id, request_id(request)
+        cart_id, data.customer_id, data.order_id, request_id(request)
     )
     return CartResponse.from_cart(cart)
 

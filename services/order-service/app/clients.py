@@ -73,7 +73,12 @@ class CartClient:
         return CartSnapshot.model_validate(cart)
 
     async def mark_checked_out(
-        self, cart_id: UUID, order_id: UUID, token: str, request_id: str | None
+        self,
+        cart_id: UUID,
+        order_id: UUID,
+        customer_id: UUID,
+        token: str,
+        request_id: str | None,
     ) -> None:
         owns = self.client is None
         client = self.client or httpx.AsyncClient(
@@ -83,7 +88,7 @@ class CartClient:
         try:
             response = await client.post(
                 f"/api/v1/internal/carts/{cart_id}/checked-out",
-                json={"order_id": str(order_id)},
+                json={"order_id": str(order_id), "customer_id": str(customer_id)},
                 headers=_headers(token, request_id),
             )
         except httpx.RequestError as exc:

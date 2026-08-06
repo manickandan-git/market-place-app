@@ -43,7 +43,7 @@ export default async function CartPage() {
 
       <ul className="flex flex-col divide-y divide-border rounded-2xl border border-border bg-card px-5 shadow-sm">
         {cart.items.map((item) => (
-          <CartItemRow key={item.id} item={item} />
+          <CartItemRow key={item.id} item={item} cartVersion={cart.version} />
         ))}
       </ul>
 

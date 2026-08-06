@@ -38,8 +38,8 @@ export async function listProducts(
       query: {
         page: params.page,
         page_size: params.pageSize,
-        category_id: params.categoryId,
-        q: params.q,
+        category_id: params.categoryId || undefined,
+        q: params.q || undefined,
       },
     },
   });

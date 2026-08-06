@@ -1,7 +1,6 @@
 import { listAddresses } from "@/lib/api/addresses";
-import { badge, card } from "@/lib/ui";
 import { AddressForm } from "./AddressForm";
-import { DeleteAddressButton } from "./DeleteAddressButton";
+import { AddressListItem } from "./AddressListItem";
 
 export default async function AddressesPage() {
   const addresses = await listAddresses();
@@ -19,38 +18,7 @@ export default async function AddressesPage() {
         ) : (
           <ul className="flex flex-col gap-3">
             {addresses.map((address) => (
-              <li
-                key={address.id}
-                className={card + " flex items-start justify-between gap-4"}
-              >
-                <address className="not-italic text-sm leading-relaxed">
-                  {address.label ? (
-                    <p className="font-medium">{address.label}</p>
-                  ) : null}
-                  {address.recipient_name}
-                  <br />
-                  {address.address_line1}
-                  {address.address_line2 ? (
-                    <>
-                      <br />
-                      {address.address_line2}
-                    </>
-                  ) : null}
-                  <br />
-                  {address.city}
-                  {address.state_or_region ? `, ${address.state_or_region}` : ""}{" "}
-                  {address.postal_code}
-                  <br />
-                  {address.country_code}
-                  {address.is_default ? (
-                    <span className={badge + " ml-2"}>Default</span>
-                  ) : null}
-                </address>
-                <DeleteAddressButton
-                  addressId={address.id}
-                  version={address.version}
-                />
-              </li>
+              <AddressListItem key={address.id} address={address} />
             ))}
           </ul>
         )}

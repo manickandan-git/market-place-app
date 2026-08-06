@@ -209,7 +209,11 @@ class OrderService:
         await self.session.refresh(order)
         try:
             await self.cart.mark_checked_out(
-                cart.id, order.id, await self._service_token(access_token), request_id
+                cart.id,
+                order.id,
+                order.customer_id,
+                await self._service_token(access_token),
+                request_id,
             )
         except ServiceError:
             # order.created remains in the outbox for a retrying integration worker.

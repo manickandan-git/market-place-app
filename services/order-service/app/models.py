@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -49,7 +50,22 @@ class PaymentStatus(StrEnum):
 class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
-        UniqueConstraint("customer_id", "cart_id", name="uq_order_customer_cart"),
+        # Partial, not a plain UniqueConstraint: scoped to non-terminal
+        # statuses so a CANCELLED or PAYMENT_FAILED order never permanently
+        # blocks reuse of that (customer_id, cart_id) pair for a later
+        # checkout attempt -- mirrors cart-service's own
+        # uq_active_cart_customer (WHERE status = 'ACTIVE') pattern. Still
+        # guards the real race this exists for: two concurrent checkouts
+        # against the same still-active cart. See migration 003 for the
+        # full rationale and the exact status list.
+        Index(
+            "uq_order_customer_cart",
+            "customer_id",
+            "cart_id",
+            unique=True,
+            postgresql_where=text("status NOT IN ('CANCELLED', 'PAYMENT_FAILED')"),
+            sqlite_where=text("status NOT IN ('CANCELLED', 'PAYMENT_FAILED')"),
+        ),
         Index("ix_orders_customer_created", "customer_id", "created_at"),
     )
 

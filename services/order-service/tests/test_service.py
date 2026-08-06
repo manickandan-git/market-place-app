@@ -32,9 +32,10 @@ class FakeCart:
     async def snapshot(self, *_args):
         return self.cart
 
-    async def mark_checked_out(self, cart_id, order_id, token, request_id):
+    async def mark_checked_out(self, cart_id, order_id, customer_id, token, request_id):
         self.checked_out = True
         self.checked_out_token = token
+        self.checked_out_customer_id = customer_id
 
 
 class FakeProducts:

@@ -1,12 +1,13 @@
 import Link from "next/link";
 
+import { listAddresses } from "@/lib/api/addresses";
 import { getCart } from "@/lib/api/cart";
 import { formatPrice } from "@/lib/format";
 import { link } from "@/lib/ui";
 import { CheckoutForm } from "./CheckoutForm";
 
 export default async function CheckoutPage() {
-  const cart = await getCart();
+  const [cart, addresses] = await Promise.all([getCart(), listAddresses()]);
 
   if (!cart || cart.items.length === 0) {
     return (
@@ -26,7 +27,11 @@ export default async function CheckoutPage() {
         <h1 className="mb-6 text-3xl font-semibold tracking-tight">
           Shipping address
         </h1>
-        <CheckoutForm cartId={cart.id} cartVersion={cart.version} />
+        <CheckoutForm
+          cartId={cart.id}
+          cartVersion={cart.version}
+          addresses={addresses}
+        />
       </div>
 
       <aside className="flex h-fit flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">

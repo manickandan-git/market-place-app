@@ -5,7 +5,14 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import IdempotencyRecord, Order
+from app.models import IdempotencyRecord, Order, OrderStatus
+
+# Must match the partial uq_order_customer_cart index exactly (see
+# migration 003_scope_order_cart_uq and models.py's Order.__table_args__)
+# -- this is an application-level pre-check for the same rule the DB
+# constraint enforces, so a CANCELLED/PAYMENT_FAILED order's cart_id can
+# be reused here too, not just at the DB layer.
+_TERMINAL_ORDER_STATUSES = (OrderStatus.CANCELLED, OrderStatus.PAYMENT_FAILED)
 
 
 class OrderRepository:
@@ -26,7 +33,9 @@ class OrderRepository:
     async def by_customer_cart(self, customer_id: UUID, cart_id: UUID) -> Order | None:
         return await self.session.scalar(
             select(Order).where(
-                Order.customer_id == customer_id, Order.cart_id == cart_id
+                Order.customer_id == customer_id,
+                Order.cart_id == cart_id,
+                Order.status.notin_(_TERMINAL_ORDER_STATUSES),
             )
         )
 

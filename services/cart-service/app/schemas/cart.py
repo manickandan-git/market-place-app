@@ -148,6 +148,12 @@ class CheckoutReadinessResponse(APIModel):
 
 class MarkCheckedOutRequest(APIModel):
     order_id: UUID
+    # order-service already knows this from its own just-persisted Order
+    # row; cart-service verifies it against the cart's actual customer_id
+    # column in CartService.mark_checked_out rather than trusting it
+    # blindly — the service-token caller only names *which* cart/customer
+    # pair, ownership is still enforced server-side.
+    customer_id: UUID
 
 
 class CartEvent(APIModel):
