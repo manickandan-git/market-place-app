@@ -63,6 +63,8 @@ ALLOWLIST: tuple[Route, ...] = (
     Route("/api/v1/webhooks/stripe", "payment_service_url"),
     # shipping-service
     Route("/api/v1/shipments", "shipping_service_url"),
+    # assistant-service
+    Route("/api/v1/assistant", "assistant_service_url"),
 )
 
 

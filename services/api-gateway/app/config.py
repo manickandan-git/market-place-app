@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     order_service_url: str = "http://localhost:8007"
     payment_service_url: str = "http://localhost:8008"
     shipping_service_url: str = "http://localhost:8009"
+    assistant_service_url: str = "http://localhost:8012"
 
 
 @lru_cache

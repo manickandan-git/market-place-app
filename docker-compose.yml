@@ -509,6 +509,7 @@ services:
       - ORDER_SERVICE_URL=http://marketplace-order-service:8007
       - PAYMENT_SERVICE_URL=http://marketplace-payment-service:8008
       - SHIPPING_SERVICE_URL=http://marketplace-shipping-service:8009
+      - ASSISTANT_SERVICE_URL=http://marketplace-assistant-service:8012
       - CORS_ORIGINS=["http://localhost:3000"]
     volumes:
       - ./services/api-gateway/app:/app/app
@@ -530,7 +531,62 @@ services:
         condition: service_started
       marketplace-shipping-service:
         condition: service_started
+      marketplace-assistant-service:
+        condition: service_started
 
+ # 25. Ai Assistant Service Database
+  marketplace-assistant-db:
+    image: pgvector/pgvector:pg16
+    container_name: marketplace-assistant-service-postgres-db
+    environment:
+      - POSTGRES_USER=marketplace
+      - POSTGRES_PASSWORD=marketplace
+      - POSTGRES_DB=assistant_service
+    volumes:
+      - marketplace_assistant_service_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d assistant_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 26. Ai Assistant Service (API)
+  marketplace-assistant-service:
+    build:
+      context: ./services/assistant-service
+      dockerfile: Dockerfile
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-assistant-db:5432/assistant_service
+      # JWT_ISSUER is a literal string compared against the access token's
+      # "iss" claim, which auth-service bakes in from its own JWT_ISSUER
+      # setting (http://localhost:8001) — this must match that value exactly
+      # and is NOT a network address, unlike JWT_JWKS_URL below.
+      - JWT_ISSUER=http://localhost:8001
+      - JWT_AUDIENCE=marketplace-api
+      - JWT_JWKS_URL=http://marketplace-auth-service:8001/.well-known/jwks.json
+      - PRODUCT_SERVICE_URL=http://marketplace-product-service:8004
+      - INVENTORY_SERVICE_URL=http://marketplace-inventory-service:8005
+      - CART_SERVICE_URL=http://marketplace-cart-service:8006
+      - ORDER_SERVICE_URL=http://marketplace-order-service:8007
+      - CORS_ORIGINS=["http://localhost:3000"]
+    volumes:
+      - ./services/assistant-service/app:/app/app
+      - ./services/assistant-service/alembic:/app/alembic
+    command: sh -c "uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8012 --reload"
+    depends_on:
+      marketplace-assistant-db:
+        condition: service_healthy
+      marketplace-auth-service:
+        condition: service_started
+      marketplace-product-service:
+        condition: service_started
+      marketplace-inventory-service:
+        condition: service_started
+      marketplace-cart-service:
+        condition: service_started
+      marketplace-order-service:
+        condition: service_started
 # Named volumes block tells Docker where to store the database files on your host machine safely
 volumes:
   marketplace_auth_service_postgres_data:
@@ -542,3 +598,4 @@ volumes:
   marketplace_inventory_service_postgres_data:
   marketplace_cart_service_postgres_data:
   marketplace_order_service_postgres_data:
+  marketplace_assistant_service_postgres_data:

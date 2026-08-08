@@ -165,9 +165,13 @@ the service-side fix separately.
 | GET | `/shipments/by-order/{order_id}`, `/shipments/{id}` | PUBLIC |
 | POST | `/shipments/{id}/ship`, `/{id}/deliver`, `/{id}/exception` | PUBLIC |
 
-No internal-only routes exposed by this service — it only ever calls
-*out* to order-service's internal fulfillment callback, it doesn't receive
-internal calls itself.
+## assistant-service (`:8012`, prefix `/api/v1`)
+
+| Method | Path | Status | Notes |
+|---|---|---|---|
+| POST | `/assistant/chat` | PUBLIC | must accept anonymous callers — guests can search/ask policy questions; assistant-service reads `Authorization` if present but doesn't require it |
+
+No internal-only routes exposed by this service.
 
 ## notification-service (`:8002`)
 

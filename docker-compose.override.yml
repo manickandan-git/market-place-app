@@ -73,3 +73,9 @@ services:
   marketplace-shipping-service:
     ports:
       - "8009:8009"
+  marketplace-assistant-db:
+    ports:
+      - "5442:5432"
+  marketplace-assistant-service:
+    ports:
+      - "8012:8012"
