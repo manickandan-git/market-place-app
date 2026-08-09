@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     embedding_model_name: str = "all-MiniLM-L6-v2"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"
+    chat_rate_limit_requests: int = 20
+    chat_rate_limit_window_seconds: int = 60
 
 @lru_cache
 def get_settings() -> Settings:

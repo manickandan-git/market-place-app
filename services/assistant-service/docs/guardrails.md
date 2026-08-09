@@ -2,14 +2,15 @@
 
 Findings from a review of `app/agent/loop.py`, `app/routes/chat.py`,
 `app/tools/`, and `app/clients.py` as of the chat endpoint's first working
-version. Nothing below is implemented yet — this is the punch list, not a
-changelog. Two things are already solid and don't need work: correlation IDs
-propagate from `ToolContext.request_id` into every downstream tool call's
-`X-Request-ID` header (`app/clients.py`), and the Anthropic API key never
-reaches the browser — `apps/web`'s `ChatWidget` calls a server action, not
-the Anthropic API directly.
+version. This is the punch list, not a changelog — items are marked done
+below as they're fixed, but read the code, not this file, for current
+behavior. Two things were already solid from the start and never needed
+work: correlation IDs propagate from `ToolContext.request_id` into every
+downstream tool call's `X-Request-ID` header (`app/clients.py`), and the
+Anthropic API key never reaches the browser — `apps/web`'s `ChatWidget`
+calls a server action, not the Anthropic API directly.
 
-## 1. No system prompt
+## 1. No system prompt — **fixed**
 
 `app/agent/loop.py`'s two `anthropic_client.messages.create(...)` calls
 (the main loop iteration and the forced final turn after `max_loops`) pass
@@ -27,7 +28,7 @@ invent price/stock/order data), and to decline off-topic requests. This is
 the actual behavior boundary for the feature and doesn't exist yet — treat
 as highest priority.
 
-## 2. Prompt-injection surface via tool results
+## 2. Prompt-injection surface via tool results — **fixed**
 
 Tool outputs are seller-controlled data (product names/descriptions from
 `search_products`, `get_product`, etc.) but get fed straight back into the
@@ -43,7 +44,7 @@ explicitly that `tool_result` content is untrusted data returned by an API,
 never instructions, and the assistant must not follow directives found
 inside it.
 
-## 3. No rate limiting on `/chat`
+## 3. No rate limiting on `/chat` — **fixed**
 
 `app/routes/chat.py`'s `chat_endpoint` accepts an optional, unverified
 Bearer token (`access_token` is extracted but never validated against
@@ -51,13 +52,24 @@ JWKS — auth enforcement happens downstream, per-tool, in the service that
 tool calls). This is intentional: per the README, `/api/v1/assistant/*` is
 allowlisted PUBLIC at the gateway because guests must be able to search the
 catalog and ask policy questions without signing in. But that same
-openness means anyone, signed in or not, can call `/chat` repeatedly with
-no throttle anywhere in `app/middleware/` — there's no cap on Anthropic
-spend per caller.
+openness meant anyone, signed in or not, could call `/chat` repeatedly with
+no throttle — there was no cap on Anthropic spend per caller.
 
-**Recommendation:** add a rate limit (e.g. Redis-backed, keyed by IP for
-anonymous callers and by subject claim for authenticated ones) ahead of the
-agent loop. Being public-by-design doesn't mean unthrottled.
+**Fix:** `app/middleware/rate_limit.py`'s `ChatRateLimitMiddleware`, scoped
+to `POST {api_prefix}/assistant/chat` only. In-memory sliding window keyed
+by the raw bearer token when present, else client IP — this service never
+verifies JWTs itself (every tool either relays the buyer's own token or is
+an unauthenticated public read), so an unverified token string is still
+enough to distinguish one caller from another for throttling. Defaults to
+20 requests / 60s (`CHAT_RATE_LIMIT_REQUESTS` /
+`CHAT_RATE_LIMIT_WINDOW_SECONDS` in `app/config.py`), returns `429` with a
+`Retry-After` header once exceeded.
+
+In-memory only — correct for the single-worker/single-replica deployment
+this service currently runs as. **If assistant-service is ever scaled to
+multiple workers or replicas, this needs a shared store (Redis) instead**,
+since each process would otherwise enforce its own independent limit,
+multiplying the effective cap by the replica count.
 
 ## 4. No bound on request size
 
@@ -96,6 +108,6 @@ tool call can tie up a FastAPI worker indefinitely.
 
 ## Priority order
 
-1 and 2 together (one system-prompt change covers both, cheapest fix for
-the actual safety boundary) → 3 (cost control, matters most once this is
-exposed beyond localhost) → 4, 5, 6.
+~~1 and 2 together (one system-prompt change covers both, cheapest fix for
+the actual safety boundary)~~ → ~~3 (cost control, matters most once this
+is exposed beyond localhost)~~ → 4, 5, 6 remaining.

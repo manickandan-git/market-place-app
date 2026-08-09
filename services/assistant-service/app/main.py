@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.exceptions import register_exception_handlers
-from app.middleware import CorrelationIdMiddleware
+from app.middleware import ChatRateLimitMiddleware, CorrelationIdMiddleware
 from app.routes import chat_router, health_router
 
 settings = get_settings()
@@ -23,6 +23,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(ChatRateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

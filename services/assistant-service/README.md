@@ -144,6 +144,8 @@ without signing in. See `services/api-gateway/docs/route-allowlist.md`.
 
 ## Guardrails
 
-The chat endpoint currently has no system prompt, no rate limiting, and a
-few other gaps — see `docs/guardrails.md` for the full findings and
-recommended fixes before this is exposed beyond localhost.
+The chat endpoint has a scope-restricting system prompt and a per-caller
+rate limit (`CHAT_RATE_LIMIT_REQUESTS`/`CHAT_RATE_LIMIT_WINDOW_SECONDS`).
+A few gaps remain — request size bounds, exception-detail leakage, and an
+overall request timeout — see `docs/guardrails.md` for the full findings
+before this is exposed beyond localhost.
