@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.exceptions import register_exception_handlers
 from app.middleware import CorrelationIdMiddleware
-from app.routes import health_router
+from app.routes import chat_router, health_router
 
 settings = get_settings()
 
@@ -31,4 +31,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health_router)
+app.include_router(chat_router, prefix=f"{settings.api_prefix}/assistant")
 register_exception_handlers(app)

@@ -569,6 +569,8 @@ services:
       - INVENTORY_SERVICE_URL=http://marketplace-inventory-service:8005
       - CART_SERVICE_URL=http://marketplace-cart-service:8006
       - ORDER_SERVICE_URL=http://marketplace-order-service:8007
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
       - CORS_ORIGINS=["http://localhost:3000"]
     volumes:
       - ./services/assistant-service/app:/app/app

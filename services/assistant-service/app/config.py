@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     cors_origins: list[str]=["http://localhost:3000"]
     sql_echo: bool = False
     embedding_model_name: str = "all-MiniLM-L6-v2"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-5"
 
 @lru_cache
 def get_settings() -> Settings:
