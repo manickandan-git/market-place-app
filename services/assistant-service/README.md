@@ -141,3 +141,9 @@ without signing in. See `services/api-gateway/docs/route-allowlist.md`.
   human-in-the-loop write-suggestion flow gets built for the seller/ops
   phase; revisit MCP if a second client (e.g. an internal tool via Claude
   Desktop) needs these tools outside the chat widget.
+
+## Guardrails
+
+The chat endpoint currently has no system prompt, no rate limiting, and a
+few other gaps — see `docs/guardrails.md` for the full findings and
+recommended fixes before this is exposed beyond localhost.
