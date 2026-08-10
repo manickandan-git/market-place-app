@@ -149,3 +149,10 @@ limit, request size bounds, a PII trim on order data, a wall-clock timeout,
 and a write-tool-per-turn cap. See `docs/guardrails.md` for the full list
 and a few smaller open items surfaced since (frontend history pruning,
 non-idempotent-write-on-timeout).
+
+## Observability
+
+Not started yet — see `docs/observability.md` for the plan. Biggest known
+gap: Anthropic token usage (`response.usage`) is never read or logged, so
+there's no visibility into per-conversation or aggregate spend despite
+rate limiting existing specifically to control it.
