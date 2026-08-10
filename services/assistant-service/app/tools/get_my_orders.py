@@ -2,6 +2,7 @@ from pydantic import BaseModel
 
 from app.clients import OrderClient
 from app.config import get_settings
+from app.tools._order_utils import summarize_order
 from app.tools.types import ToolContext, ToolSpec
 
 _client = OrderClient(get_settings())
@@ -21,7 +22,7 @@ async def handle(args: dict, context: ToolContext) -> dict:
     page = await _client.get_my_orders(context.access_token, context.request_id)
     return {
         "authenticated": True,
-        "orders": page["items"],
+        "orders": [summarize_order(o) for o in page["items"]],
         "total": page["total_items"],
     }
 

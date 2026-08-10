@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -8,6 +9,8 @@ from app.config import get_settings
 from app.exceptions import ServiceError
 from app.tools import TOOLS, TOOLS_BY_NAME
 from app.tools.types import ToolContext
+
+logger = logging.getLogger(__name__)
 
 _settings = get_settings()
 anthropic_client = AsyncAnthropic(api_key=_settings.anthropic_api_key)
@@ -68,9 +71,33 @@ async def run_agent_loop(
         # Extract only the tool use blocks
         tool_blocks = [b for b in response.content if b.type == "tool_use"]
 
-        # Dispatch and gather all tool calls concurrently
-        tasks = [run_single_tool(block, context) for block in tool_blocks]
+        # Claude could otherwise batch multiple add_to_cart calls in one
+        # turn; cap write tools to one per turn. Every tool_use still needs
+        # a matching tool_result (Anthropic API requirement), so rejected
+        # calls get a synthetic error result rather than being dropped.
+        write_seen = False
+        runnable_blocks = []
+        rejected_ids = []
+        for block in tool_blocks:
+            spec = TOOLS_BY_NAME.get(block.name)
+            if spec and spec.is_write:
+                if write_seen:
+                    rejected_ids.append(block.id)
+                    continue
+                write_seen = True
+            runnable_blocks.append(block)
+
+        tasks = [run_single_tool(block, context) for block in runnable_blocks]
         tool_results_content = await asyncio.gather(*tasks)
+        tool_results_content = list(tool_results_content) + [
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_id,
+                "content": "Only one cart update is allowed per turn.",
+                "is_error": True,
+            }
+            for tool_id in rejected_ids
+        ]
 
         # Commit the tool outcome layer back to conversation history
         messages.append({
@@ -125,11 +152,20 @@ async def run_single_tool(block: Any, context: ToolContext) -> dict[str, Any]:
             "content": f"ServiceError: Downstream tool execution failed. {str(err)}",
             "is_error": True,
         }
-    except Exception as system_err:
-        # Fallback for unexpected runtime issues
+    except Exception:
+        # Fallback for unexpected runtime issues. Log the real exception
+        # server-side (with request_id for correlation) instead of putting
+        # its text into the conversation history Claude reasons over -
+        # str(exc) could leak internal detail (stack trace fragments,
+        # internal hostnames/paths) that Claude might echo back to the user.
+        logger.exception(
+            "Tool '%s' failed unexpectedly (request_id=%s)",
+            tool_name,
+            context.request_id,
+        )
         return {
             "type": "tool_result",
             "tool_use_id": tool_id,
-            "content": f"RuntimeError: Internal agent failure. {str(system_err)}",
+            "content": "RuntimeError: internal error, could not complete this action.",
             "is_error": True,
         }

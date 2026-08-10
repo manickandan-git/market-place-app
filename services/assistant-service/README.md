@@ -144,8 +144,8 @@ without signing in. See `services/api-gateway/docs/route-allowlist.md`.
 
 ## Guardrails
 
-The chat endpoint has a scope-restricting system prompt and a per-caller
-rate limit (`CHAT_RATE_LIMIT_REQUESTS`/`CHAT_RATE_LIMIT_WINDOW_SECONDS`).
-A few gaps remain — request size bounds, exception-detail leakage, and an
-overall request timeout — see `docs/guardrails.md` for the full findings
-before this is exposed beyond localhost.
+The chat endpoint has a scope-restricting system prompt, a per-caller rate
+limit, request size bounds, a PII trim on order data, a wall-clock timeout,
+and a write-tool-per-turn cap. See `docs/guardrails.md` for the full list
+and a few smaller open items surfaced since (frontend history pruning,
+non-idempotent-write-on-timeout).

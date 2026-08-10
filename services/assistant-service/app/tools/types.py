@@ -14,6 +14,7 @@ class ToolSpec:
     description: str
     input_schema: dict
     handler: Callable[[dict, ToolContext], Awaitable[dict]]
+    is_write: bool = False
 
     def to_anthropic_tool(self) -> dict:
         return {

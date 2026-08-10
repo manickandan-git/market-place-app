@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-5"
     chat_rate_limit_requests: int = 20
     chat_rate_limit_window_seconds: int = 60
+    chat_request_timeout_seconds: float = 45.0
 
 @lru_cache
 def get_settings() -> Settings:

@@ -571,6 +571,9 @@ services:
       - ORDER_SERVICE_URL=http://marketplace-order-service:8007
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
+      - CHAT_RATE_LIMIT_REQUESTS=${CHAT_RATE_LIMIT_REQUESTS:-20}
+      - CHAT_RATE_LIMIT_WINDOW_SECONDS=${CHAT_RATE_LIMIT_WINDOW_SECONDS:-60}
+      - CHAT_REQUEST_TIMEOUT_SECONDS=${CHAT_REQUEST_TIMEOUT_SECONDS:-45}
       - CORS_ORIGINS=["http://localhost:3000"]
     volumes:
       - ./services/assistant-service/app:/app/app

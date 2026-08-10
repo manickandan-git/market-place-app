@@ -23,8 +23,16 @@ def fake_client(monkeypatch):
     fake = FakeOrderClient(
         {
             "items": [
-                {"id": "order1", "total": 100},
-                {"id": "order2", "total": 200},
+                {
+                    "id": "order1",
+                    "grand_total": 100,
+                    "billing_address": {"street": "should be trimmed"},
+                },
+                {
+                    "id": "order2",
+                    "grand_total": 200,
+                    "billing_address": {"street": "should be trimmed"},
+                },
             ],
             "total_items": 2,
         }
@@ -40,11 +48,13 @@ async def test_handle_returns_orders_when_authenticated():
         ToolContext(request_id="req-1", access_token="token-1"),
     )
 
+    # billing_address is dropped by summarize_order (see _order_utils.py) -
+    # only fields the assistant actually needs survive the trim.
     assert result == {
         "authenticated": True,
         "orders": [
-            {"id": "order1", "total": 100},
-            {"id": "order2", "total": 200},
+            {"id": "order1", "grand_total": 100},
+            {"id": "order2", "grand_total": 200},
         ],
         "total": 2,
     }

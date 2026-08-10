@@ -23,7 +23,13 @@ class FakeOrderClient:
 
 @pytest.fixture
 def fake_client(monkeypatch):
-    fake = FakeOrderClient({"id": "order-1", "status": "shipped"})
+    fake = FakeOrderClient(
+        {
+            "id": "order-1",
+            "status": "shipped",
+            "billing_address": {"street": "should be trimmed"},
+        }
+    )
     monkeypatch.setattr(get_order_status, "_client", fake)
     return fake
 
@@ -35,6 +41,8 @@ async def test_handle_returns_order_when_authenticated():
         ToolContext(request_id="req-1", access_token="token-1"),
     )
 
+    # billing_address is dropped by summarize_order (see _order_utils.py) -
+    # only fields the assistant actually needs survive the trim.
     assert result == {
         "authenticated": True,
         "order": {"id": "order-1", "status": "shipped"},

@@ -44,4 +44,5 @@ ADD_TO_CART = ToolSpec(
     ),
     input_schema=AddToCartArgs.model_json_schema(),
     handler=handle,
+    is_write=True,
 )
