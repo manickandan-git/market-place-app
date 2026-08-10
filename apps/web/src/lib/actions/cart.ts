@@ -41,6 +41,10 @@ export async function addToCartAction(
   }
   const result = await cartApi.addItem(productId, variantId, quantity, version);
   revalidatePath("/cart");
+  // SiteHeader's cart badge lives in the root layout, a separate cache
+  // segment from the /cart page itself — revalidatePath("/cart") alone
+  // never touches it. Revalidating the root layout covers every route.
+  revalidatePath("/", "layout");
   return { ok: result.ok, message: result.message };
 }
 
@@ -70,6 +74,7 @@ export async function updateQuantityAction(
   }
   const result = await cartApi.updateItemQuantity(itemId, quantity, version);
   revalidatePath("/cart");
+  revalidatePath("/", "layout");
   return { ok: result.ok, message: result.message };
 }
 
@@ -81,6 +86,7 @@ export async function removeItemAction(
   const version = Number(formData.get("version"));
   const result = await cartApi.removeItem(itemId, version);
   revalidatePath("/cart");
+  revalidatePath("/", "layout");
   return { ok: result.ok, message: result.message };
 }
 
@@ -91,6 +97,7 @@ export async function clearCartAction(
   const version = Number(formData.get("version"));
   const result = await cartApi.clearCart(version);
   revalidatePath("/cart");
+  revalidatePath("/", "layout");
   return { ok: result.ok, message: result.message };
 }
 
@@ -102,6 +109,7 @@ export async function saveForLaterAction(
   const version = Number(formData.get("version"));
   const result = await cartApi.saveForLater(itemId, version);
   revalidatePath("/cart");
+  revalidatePath("/", "layout");
   return { ok: result.ok, message: result.message };
 }
 
@@ -113,6 +121,7 @@ export async function moveToCartAction(
   const version = Number(formData.get("version"));
   const result = await cartApi.moveSavedToCart(itemId, version);
   revalidatePath("/cart");
+  revalidatePath("/", "layout");
   return { ok: result.ok, message: result.message };
 }
 
@@ -124,5 +133,6 @@ export async function deleteSavedItemAction(
   const version = Number(formData.get("version"));
   const result = await cartApi.deleteSavedItem(itemId, version);
   revalidatePath("/cart");
+  revalidatePath("/", "layout");
   return { ok: result.ok, message: result.message };
 }

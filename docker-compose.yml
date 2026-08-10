@@ -400,6 +400,20 @@ services:
     build:
       context: ./services/payment-service
       dockerfile: Dockerfile
+    # STRIPE_SECRET_KEY/STRIPE_WEBHOOK_SECRET come from this file instead of
+    # being hardcoded below, so editing services/payment-service/.env and
+    # recreating the container (`docker compose up -d marketplace-payment-service`)
+    # is enough to point it at a live `stripe listen` session's secret — no
+    # docker-compose.yml edit needed. `environment:` below still wins over
+    # this file for every other key (DB/JWT/service URLs use container
+    # hostnames, not the localhost values in .env meant for local `uv run`).
+    # NOTE: the integration-test suite's synthetic Stripe webhook signing
+    # (tests/integration-tests/.env.integration) expects STRIPE_WEBHOOK_SECRET
+    # to be the fixed whsec_dev_only_e2e_workflow_test_secret value — set
+    # services/payment-service/.env back to that before running it, or those
+    # tests' signatures won't verify.
+    env_file:
+      - ./services/payment-service/.env
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql+asyncpg://marketplace:marketplace@marketplace-payment-db:5432/payment_service
@@ -414,12 +428,6 @@ services:
       - ORDER_SERVICE_URL=http://marketplace-order-service:8007
       - PAYMENT_SERVICE_CLIENT_ID=payment-service
       - PAYMENT_SERVICE_CLIENT_SECRET=xY33Xgfpd4nzK3fYx3hsR9cOP2ONergC9Y34M5P1OQw
-      - STRIPE_SECRET_KEY=sk_test_51U0XLWPAO1Ix6BTP8DCTdT9qlnuO1FZ1WDmZZncon46XLYrQ8wFiHX1YjfwGSUxPUarzg2jbbT4KFd3bvA8Z663300wa3VoPkY
-      # Fixed dev-only value so signed test events can be constructed without
-      # `stripe listen` running (which mints a new secret each session).
-      # Real deployments must not hardcode this — see payment-service's
-      # README for the `stripe listen` webhook-forwarding setup.
-      - STRIPE_WEBHOOK_SECRET=whsec_dev_only_e2e_workflow_test_secret
       - CORS_ORIGINS=["http://localhost:3000"]
     volumes:
       - ./services/payment-service/app:/app/app
@@ -511,6 +519,15 @@ services:
       - SHIPPING_SERVICE_URL=http://marketplace-shipping-service:8009
       - ASSISTANT_SERVICE_URL=http://marketplace-assistant-service:8012
       - CORS_ORIGINS=["http://localhost:3000"]
+      # Default (10s) is shorter than assistant-service's own documented
+      # chat timeout (CHAT_REQUEST_TIMEOUT_SECONDS=45 below) — a multi-tool
+      # round trip through the real Anthropic API routinely exceeds 10s,
+      # so the gateway was killing legitimate in-progress chat requests
+      # with 504s (and tripping the circuit breaker after 5 of them) well
+      # before assistant-service's own timeout ever mattered. This is a
+      # single global setting for every proxied route, not assistant-only;
+      # 50s is still comfortably under the config's 60s cap.
+      - DOWNSTREAM_TIMEOUT_SECONDS=50
     volumes:
       - ./services/api-gateway/app:/app/app
     command: sh -c "uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 9000 --reload"

@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import * as addressesApi from "@/lib/api/addresses";
@@ -127,5 +128,11 @@ export async function createOrderAction(
     return { ok: false, message: result.message };
   }
 
+  // Order creation retires the cart server-side (order-service marks it
+  // CHECKED_OUT). Revalidate the root layout so SiteHeader's cart badge
+  // (a separate cache segment from /cart) reflects that on the next
+  // render, plus /cart itself in case the buyer navigates back to it.
+  revalidatePath("/", "layout");
+  revalidatePath("/cart");
   redirect(`/checkout/${result.order.id}/pay`);
 }

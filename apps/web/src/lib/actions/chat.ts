@@ -58,10 +58,11 @@ export async function sendChatMessageAction(
 
   // The assistant's add_to_cart tool may have just changed the buyer's
   // cart. Revalidate unconditionally — the response doesn't say which
-  // tools ran, and this is cheap — so the header badge (SiteHeader) picks
-  // up the change on its next render, same as every existing cart Server
-  // Action already does.
+  // tools ran, and this is cheap. The header badge (SiteHeader) lives in
+  // the root layout, a separate cache segment from /cart, so both calls
+  // are needed.
   revalidatePath("/cart");
+  revalidatePath("/", "layout");
 
   return { ok: true, reply: data.response };
 }
