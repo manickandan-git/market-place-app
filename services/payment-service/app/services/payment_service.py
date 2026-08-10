@@ -126,8 +126,28 @@ class PaymentService:
         payment_id: UUID,
         data: RefundCreate,
         principal: Principal,
+        idempotency_key: str | None,
         request_id: str | None,
     ) -> Refund:
+        request_hash = hashlib.sha256(
+            f"{payment_id}:{data.model_dump_json()}".encode()
+        ).hexdigest()
+        if idempotency_key:
+            existing = await self.repo.get_idempotency_record(
+                principal.subject, idempotency_key
+            )
+            if existing:
+                if existing.request_hash != request_hash:
+                    raise ServiceError(
+                        409,
+                        "idempotency_conflict",
+                        "Idempotency key was reused with another request",
+                    )
+                if existing.resource_id:
+                    refund = await self.repo.get_refund(existing.resource_id)
+                    if refund:
+                        return refund
+
         payment = await self.repo.get_payment(payment_id, for_update=True)
         if not payment:
             raise ServiceError(404, "payment_not_found", "Payment was not found")
@@ -157,6 +177,7 @@ class PaymentService:
         provider_refund_id = await self.stripe.create_refund(
             payment.provider_payment_intent_id,
             data.amount,
+            idempotency_key,
         )
         refund = Refund(
             payment_id=payment.id,
@@ -178,6 +199,17 @@ class PaymentService:
             else PaymentStatus.PARTIALLY_REFUNDED
         )
         payment.version += 1
+        await self.session.flush()
+        if idempotency_key:
+            self.session.add(
+                IdempotencyRecord(
+                    actor_id=principal.subject,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                    resource_type="refund",
+                    resource_id=refund.id,
+                )
+            )
         # Commit before calling Order, unlike the webhook handlers below:
         # Stripe's refund API call above already moved real money, and this
         # buyer-facing endpoint has no Stripe-driven retrier behind it. If

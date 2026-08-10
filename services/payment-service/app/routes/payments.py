@@ -86,8 +86,9 @@ async def create_refund(
     request: Request,
     principal: Buyer,
     service: Service,
+    idempotency_key: IdempotencyKey,
 ) -> RefundResponse:
     refund = await service.create_refund(
-        payment_id, data, principal, _request_id(request)
+        payment_id, data, principal, idempotency_key, _request_id(request)
     )
     return RefundResponse.model_validate(refund)

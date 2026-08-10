@@ -55,11 +55,14 @@ class StripeClient:
         self,
         payment_intent_id: str,
         amount: Decimal | None,
+        idempotency_key: str | None = None,
     ) -> str:
         try:
             kwargs: dict = {"payment_intent": payment_intent_id}
             if amount is not None:
                 kwargs["amount"] = to_minor_units(amount)
+            if idempotency_key:
+                kwargs["idempotency_key"] = f"refund:{idempotency_key}"
             refund = await stripe.Refund.create_async(**kwargs)
         except stripe.StripeError as exc:
             raise ServiceError(502, "stripe_error", str(exc)) from exc

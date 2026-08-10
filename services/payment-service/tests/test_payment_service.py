@@ -35,10 +35,16 @@ class FakeStripeClient:
             id=pi_id, client_secret=f"{pi_id}_secret", status="requires_payment_method"
         )
 
-    async def create_refund(self, payment_intent_id, amount):
+    async def create_refund(self, payment_intent_id, amount, idempotency_key=None):
         self._counter += 1
         refund_id = f"re_test_{self._counter}"
-        self.refunds.append({"payment_intent_id": payment_intent_id, "amount": amount})
+        self.refunds.append(
+            {
+                "payment_intent_id": payment_intent_id,
+                "amount": amount,
+                "idempotency_key": idempotency_key,
+            }
+        )
         return refund_id
 
 
@@ -337,7 +343,9 @@ async def test_full_refund_marks_payment_refunded(session) -> None:
         make_event("evt_5", "payment_intent.succeeded", intent_id), None
     )
 
-    refund = await service.create_refund(payment.id, RefundCreate(), buyer, None)
+    refund = await service.create_refund(
+        payment.id, RefundCreate(), buyer, None, None
+    )
 
     assert refund.status == RefundStatus.SUCCEEDED
     assert refund.amount == Decimal("40.00")
@@ -360,10 +368,10 @@ async def test_sequential_partial_refunds_report_cumulative_amount(session) -> N
     )
 
     await service.create_refund(
-        payment.id, RefundCreate(amount=Decimal("15.00")), buyer, None
+        payment.id, RefundCreate(amount=Decimal("15.00")), buyer, None, None
     )
     await service.create_refund(
-        payment.id, RefundCreate(amount=Decimal("25.00")), buyer, None
+        payment.id, RefundCreate(amount=Decimal("25.00")), buyer, None, None
     )
 
     assert [c["refunded_amount"] for c in order_client.refunded_calls] == [
@@ -387,7 +395,9 @@ async def test_refund_survives_order_callback_failure(session) -> None:
         make_event("evt_5c", "payment_intent.succeeded", intent_id), None
     )
 
-    refund = await service.create_refund(payment.id, RefundCreate(), buyer, None)
+    refund = await service.create_refund(
+        payment.id, RefundCreate(), buyer, None, None
+    )
 
     assert refund.status == RefundStatus.SUCCEEDED
     updated = await service.get_payment(payment.id, buyer)
@@ -408,7 +418,7 @@ async def test_partial_refund_marks_payment_partially_refunded(session) -> None:
     )
 
     refund = await service.create_refund(
-        payment.id, RefundCreate(amount=Decimal("15.00")), buyer, None
+        payment.id, RefundCreate(amount=Decimal("15.00")), buyer, None, None
     )
 
     assert refund.amount == Decimal("15.00")
@@ -430,7 +440,7 @@ async def test_refund_rejects_amount_exceeding_remaining(session) -> None:
 
     with pytest.raises(ServiceError) as error:
         await service.create_refund(
-            payment.id, RefundCreate(amount=Decimal("100.00")), buyer, None
+            payment.id, RefundCreate(amount=Decimal("100.00")), buyer, None, None
         )
     assert error.value.code == "refund_exceeds_remaining"
 
@@ -444,5 +454,59 @@ async def test_refund_rejects_unsucceeded_payment(session) -> None:
     )
 
     with pytest.raises(ServiceError) as error:
-        await service.create_refund(payment.id, RefundCreate(), buyer, None)
+        await service.create_refund(payment.id, RefundCreate(), buyer, None, None)
     assert error.value.code == "payment_not_refundable"
+
+
+async def test_refund_replay_with_same_idempotency_key_does_not_double_refund(
+    session,
+) -> None:
+    order_client = FakeOrderClient(uuid4(), Decimal("40.00"))
+    service, stripe, _ = build_service(session, order_client=order_client)
+    buyer = principal()
+    payment, _ = await service.create_payment(
+        PaymentCreate(order_id=order_client.order_id), buyer, "token", None, None
+    )
+    intent_id = stripe.created[0]["id"]
+    await service.handle_webhook_event(
+        make_event("evt_8", "payment_intent.succeeded", intent_id), None
+    )
+
+    data = RefundCreate(amount=Decimal("10.00"))
+    first = await service.create_refund(
+        payment.id, data, buyer, "refund-retry-key", None
+    )
+    retried = await service.create_refund(
+        payment.id, data, buyer, "refund-retry-key", None
+    )
+
+    assert retried.id == first.id
+    assert len(stripe.refunds) == 1
+    updated = await service.get_payment(payment.id, buyer)
+    assert updated.refunded_amount == Decimal("10.00")
+
+
+async def test_refund_idempotency_key_reuse_with_different_body_conflicts(
+    session,
+) -> None:
+    order_client = FakeOrderClient(uuid4(), Decimal("40.00"))
+    service, stripe, _ = build_service(session, order_client=order_client)
+    buyer = principal()
+    payment, _ = await service.create_payment(
+        PaymentCreate(order_id=order_client.order_id), buyer, "token", None, None
+    )
+    intent_id = stripe.created[0]["id"]
+    await service.handle_webhook_event(
+        make_event("evt_9", "payment_intent.succeeded", intent_id), None
+    )
+
+    await service.create_refund(
+        payment.id, RefundCreate(amount=Decimal("10.00")), buyer, "reused-key", None
+    )
+
+    with pytest.raises(ServiceError) as error:
+        await service.create_refund(
+            payment.id, RefundCreate(amount=Decimal("20.00")), buyer, "reused-key", None
+        )
+    assert error.value.code == "idempotency_conflict"
+    assert len(stripe.refunds) == 1

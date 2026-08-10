@@ -46,6 +46,10 @@ class PaymentRepository:
             stmt = stmt.with_for_update()
         return (await self.session.scalars(stmt)).one_or_none()
 
+    async def get_refund(self, refund_id: UUID) -> Refund | None:
+        stmt = select(Refund).where(Refund.id == refund_id)
+        return await self.session.scalar(stmt)
+
     async def list_refunds(self, payment_id: UUID) -> list[Refund]:
         stmt = (
             select(Refund)
