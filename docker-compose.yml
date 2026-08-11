@@ -647,6 +647,8 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     volumes:
       - ./infrastructure/monitoirng/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./infrastructure/monitoirng/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./infrastructure/monitoirng/dashboards:/etc/grafana/provisioning/dashboards/files:ro
       - marketplace_grafana_data:/var/lib/grafana
     depends_on:
       - marketplace-loki

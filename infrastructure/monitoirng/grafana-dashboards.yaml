@@ -1,0 +1,16 @@
+# Grafana provisioning file: auto-loads every dashboard JSON file in
+# infrastructure/monitoirng/dashboards/ on container startup, so the
+# assistant-service dashboard is there on a fresh `docker compose up`
+# with no manual import step.
+apiVersion: 1
+
+providers:
+  - name: assistant-service
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/files
