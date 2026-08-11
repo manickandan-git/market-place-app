@@ -609,6 +609,33 @@ services:
         condition: service_started
       marketplace-order-service:
         condition: service_started
+
+  # 27. Web frontend (Next.js, BFF pattern — see apps/web/src/lib/config.ts).
+  # Talks to the API gateway only from server-side code (route handlers,
+  # Server Components, the proxy) over the Docker network; the browser
+  # never calls the gateway directly. Runs `next dev` for hot reload,
+  # matching every other service's --reload dev workflow. node_modules and
+  # .next are anonymous volumes so the host's (Windows) copies never shadow
+  # the Linux-built ones baked into the image — see apps/web/Dockerfile.
+  marketplace-web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      # Server-side only, never exposed to the browser — see
+      # apps/web/src/lib/config.ts's docstring on why this has no
+      # NEXT_PUBLIC_ prefix.
+      - GATEWAY_URL=http://marketplace-api-gateway:9000
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+    depends_on:
+      marketplace-api-gateway:
+        condition: service_started
+
   # 23. Observability stack (dev) — Loki aggregates every container's
   # stdout/stderr (via Promtail, using Docker service discovery so new
   # services are picked up automatically, no per-service config needed),

@@ -79,8 +79,16 @@ services:
   marketplace-assistant-service:
     ports:
       - "8012:8012"
-  # 3000 is taken by apps/web's own dev server (a separate, non-Docker
-  # process) — Grafana's UI is published on 3300 instead.
+  # Published as 3001 on the host, not 3000: this repo's non-Docker
+  # `next dev` workflow already binds host 3000, and both can't hold it
+  # at once. If you stop the local `next dev` process, change this to
+  # "3000:3000" to match the CORS_ORIGINS=["http://localhost:3000"]
+  # settings above.
+  marketplace-web:
+    ports:
+      - "3001:3000"
+  # apps/web takes 3000 (locally) / 3001 (Docker) — Grafana's UI is
+  # published on 3300 instead.
   marketplace-grafana:
     ports:
       - "3300:3000"
