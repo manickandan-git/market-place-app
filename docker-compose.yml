@@ -441,6 +441,37 @@ services:
       marketplace-order-service:
         condition: service_started
 
+  # 21b. Stripe CLI, running `stripe listen` so Stripe's real test-mode
+  # webhooks reach payment-service automatically — no host-side `stripe
+  # listen` process required anymore. `stripe login` doesn't work in a
+  # container (nothing to persist credentials to across recreations), so
+  # this authenticates purely via `--api-key`, reusing the same
+  # STRIPE_SECRET_KEY as payment-service via the same env_file — no
+  # separate credential to manage.
+  #
+  # One-time setup: the webhook signing secret Stripe hands back for a
+  # given API key does NOT change between `stripe listen` restarts, so
+  # you only need to fetch it once — `docker compose logs -f
+  # marketplace-stripe-listen` after first `up` and copy the
+  # "Ready! Your webhook signing secret is whsec_..." line into
+  # STRIPE_WEBHOOK_SECRET in services/payment-service/.env, then
+  # `docker compose up -d marketplace-payment-service` to pick it up.
+  # (Remember the existing note above: switch STRIPE_WEBHOOK_SECRET back to
+  # whsec_dev_only_e2e_workflow_test_secret before running the integration
+  # test suite.)
+  marketplace-stripe-listen:
+    image: stripe/stripe-cli
+    container_name: marketplace-stripe-listen
+    env_file:
+      - ./services/payment-service/.env
+    entrypoint: sh
+    command:
+      - -c
+      - stripe listen --api-key "$$STRIPE_SECRET_KEY" --forward-to marketplace-payment-service:8008/api/v1/webhooks/stripe
+    depends_on:
+      marketplace-payment-service:
+        condition: service_started
+
   # 22. The Shipping Service Database
   marketplace-shipping-db:
     image: postgres:16-alpine

@@ -202,9 +202,12 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   never trusted from the client) and only calls order-service's
   `payment-authorized`/`payment-failed` callbacks from its Stripe webhook
   handler (`POST /api/v1/webhooks/stripe`) — confirmation is webhook-driven,
-  not synchronous, matching Stripe's recommended pattern. Local dev requires
-  `stripe listen --forward-to localhost:8008/api/v1/webhooks/stripe`
-  running; see `services/payment-service/README.md`. Full scoping notes
+  not synchronous, matching Stripe's recommended pattern. Local dev needs
+  `stripe listen` forwarding to that endpoint; a `marketplace-stripe-listen`
+  container in the root `docker-compose.yml` runs this automatically
+  (Stripe CLI's official `stripe/stripe-cli` image, authenticated via
+  `--api-key` since `stripe login` doesn't work in a container) — see
+  `services/payment-service/README.md`. Full scoping notes
   (including what was still undesigned before this was built, e.g. refunds)
   are in `services/order-service/docs/payment-service-scope.md`.
   auth-service was extended with a `payment-service` client-credentials

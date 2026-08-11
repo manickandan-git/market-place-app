@@ -46,19 +46,32 @@ uv run pytest -v
 
 1. Create a free Stripe account, switch to **test mode**, and copy the
    test **Secret key** (`sk_test_...`) from
-   https://dashboard.stripe.com/test/apikeys into `STRIPE_SECRET_KEY`.
-2. Install the [Stripe CLI](https://docs.stripe.com/stripe-cli) and run:
+   https://dashboard.stripe.com/test/apikeys into `STRIPE_SECRET_KEY` in
+   `services/payment-service/.env`.
+2. `docker compose up -d` (or just `marketplace-stripe-listen`) starts the
+   [Stripe CLI](https://docs.stripe.com/stripe-cli) `stripe listen`
+   automatically, in its own container
+   (`marketplace-stripe-listen` in the root `docker-compose.yml`) —
+   forwarding real Stripe test-mode webhook events straight to
+   `payment-service`. No public URL, ngrok, or host-side `stripe` install
+   needed, and unlike running it on your host it doesn't stop when you
+   close a terminal. It authenticates with `STRIPE_SECRET_KEY` directly
+   (`--api-key`, since `stripe login` doesn't work in a container), so it
+   picks up the same key you just set in step 1.
 
-   ```powershell
-   stripe listen --forward-to localhost:8008/api/v1/webhooks/stripe
-   ```
+   The only manual step is the webhook signing secret, and only once: it
+   doesn't change between `stripe listen` restarts, so run
+   `docker compose logs -f marketplace-stripe-listen`, copy the
+   `whsec_...` from the "Ready! ... Your webhook signing secret is
+   whsec_..." line into `STRIPE_WEBHOOK_SECRET`, then
+   `docker compose up -d marketplace-payment-service` to pick it up. A
+   payment can't resolve out of `pending` until this is running and
+   correct, since confirmation is webhook-driven (see below).
 
-   This forwards real Stripe test-mode webhook events to your local
-   machine — no public URL or ngrok needed — and prints a webhook signing
-   secret (`whsec_...`); put that in `STRIPE_WEBHOOK_SECRET`. Keep
-   `stripe listen` running while testing; it must be running for a payment
-   to ever resolve out of `pending`, since confirmation is webhook-driven
-   (see below).
+   Running `stripe listen` on your host instead is still fine if you
+   prefer it (`stripe listen --forward-to localhost:8008/api/v1/webhooks/stripe`)
+   — just stop the `marketplace-stripe-listen` container first so the two
+   don't both try to deliver the same events.
 3. Use Stripe's test card numbers to exercise both outcomes:
    `4242 4242 4242 4242` (any future expiry, any CVC) always succeeds;
    `4000 0000 0000 0002` always declines.
