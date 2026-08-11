@@ -25,6 +25,16 @@ class ChatRateLimitMiddleware(BaseHTTPMiddleware):
     relays the buyer's token downstream or is an unauthenticated public
     read, see README), so an unverified token string is still enough to
     distinguish one caller from another for throttling purposes.
+
+    Anonymous traffic is keyed by X-Forwarded-For when present, not
+    request.client.host directly: every request arrives via api-gateway
+    (services/api-gateway/app/services/proxy_service.py), which otherwise
+    means request.client.host is always the gateway's own docker-network
+    IP — collapsing every signed-out guest into one shared bucket. The
+    gateway sets X-Forwarded-For to the real caller's IP for exactly this
+    reason. Falling back to request.client.host keeps this middleware
+    correct when tested directly against this service (bypassing the
+    gateway), where there's no X-Forwarded-For to trust.
     """
 
     def __init__(self, app):
@@ -40,6 +50,9 @@ class ChatRateLimitMiddleware(BaseHTTPMiddleware):
         auth = request.headers.get("Authorization")
         if auth:
             return f"token:{auth}"
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return f"ip:{forwarded}"
         client = request.client
         return f"ip:{client.host}" if client else "ip:unknown"
 

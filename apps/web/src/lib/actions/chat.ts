@@ -16,6 +16,27 @@ export interface ChatActionResult {
   error?: string;
 }
 
+// Must match assistant-service's ChatRequest.messages max_length
+// (services/assistant-service/app/routes/chat.py). ChatWidget's own
+// `messages` state is never trimmed — this only bounds what's sent over
+// the wire, so the visible conversation never loses history, only what
+// the model re-reads on later turns.
+const MAX_HISTORY_MESSAGES = 40;
+
+function windowHistory(messages: ChatMessage[]): ChatMessage[] {
+  // Turns strictly alternate user/assistant starting with "user" (a
+  // Messages API requirement — see ChatWidget's comment on why the
+  // greeting bubble is never included). Trim from the front two at a
+  // time (one full user+assistant pair) so a window never starts on an
+  // "assistant" turn, which a plain tail slice could produce depending
+  // on parity.
+  let windowed = messages;
+  while (windowed.length > MAX_HISTORY_MESSAGES) {
+    windowed = windowed.slice(2);
+  }
+  return windowed;
+}
+
 /**
  * Calls assistant-service's chat endpoint through the gateway, attaching the
  * buyer's bearer token server-side when signed in — guests get no
@@ -44,7 +65,7 @@ export async function sendChatMessageAction(
     response = await fetch(`${config.gatewayUrl}/api/v1/assistant/chat`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages: windowHistory(messages) }),
     });
   } catch {
     return { ok: false, error: "Could not reach the assistant right now." };

@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import time
 
@@ -45,7 +46,10 @@ class ProductClient:
             if owns_client:
                 await client.aclose()
         _log_downstream(
-            "product-service", "search_products", response.status_code, start,
+            "product-service",
+            "search_products",
+            response.status_code,
+            start,
             request_id,
         )
         if response.status_code >= 400:
@@ -77,7 +81,10 @@ class ProductClient:
             if owns_client:
                 await client.aclose()
         _log_downstream(
-            "product-service", "get_product_by_slug", response.status_code, start,
+            "product-service",
+            "get_product_by_slug",
+            response.status_code,
+            start,
             request_id,
         )
         if response.status_code == 404:
@@ -107,7 +114,10 @@ class ProductClient:
             if owns_client:
                 await client.aclose()
         _log_downstream(
-            "product-service", "list_categories", response.status_code, start,
+            "product-service",
+            "list_categories",
+            response.status_code,
+            start,
             request_id,
         )
         if response.status_code >= 400:
@@ -120,9 +130,7 @@ class InventoryClient:
         self.settings = settings
         self._client = client
 
-    async def get_availability(
-        self, sku: str, request_id: str | None
-    ) -> dict:
+    async def get_availability(self, sku: str, request_id: str | None) -> dict:
         headers = {"X-Request-ID": request_id} if request_id else {}
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(
@@ -145,7 +153,10 @@ class InventoryClient:
             if owns_client:
                 await client.aclose()
         _log_downstream(
-            "inventory-service", "get_availability", response.status_code, start,
+            "inventory-service",
+            "get_availability",
+            response.status_code,
+            start,
             request_id,
         )
         if response.status_code >= 400:
@@ -236,6 +247,26 @@ class CartClient:
         self.settings = settings
         self._client = client
 
+    def _add_item_idempotency_key(
+        self, product_id: str, variant_id: str, quantity: int
+    ) -> str:
+        # Content-derived, not random: two add_to_cart calls for the same
+        # product/variant/quantity within the same time bucket collide onto
+        # the same key, so cart-service's existing idempotency dedup
+        # (services/cart-service/app/services/cart_service.py's add_item)
+        # returns the cached cart instead of double-adding. This is what
+        # closes docs/guardrails.md finding B: chat.py's wall-clock timeout
+        # can cancel this call after the POST already reached cart-service,
+        # and if the buyer/model retries shortly after (the realistic case
+        # — there's no automatic HTTP-level retry anywhere in this stack),
+        # this makes that retry a safe no-op instead of a second add.
+        # cart-service scopes idempotency keys per-actor server-side, so
+        # nothing about the caller's identity needs to be in the key here.
+        window = self.settings.cart_add_idempotency_window_seconds
+        bucket = int(time.time() // window)
+        raw = f"{product_id}:{variant_id}:{quantity}:{bucket}"
+        return hashlib.sha256(raw.encode()).hexdigest()
+
     async def add_item(
         self,
         access_token: str,
@@ -262,11 +293,15 @@ class CartClient:
                     "Access token was rejected by Cart Service",
                 )
             if cart_response.status_code >= 400:
-                raise ServiceError(
-                    502, "cart_service_error", "Cart lookup failed"
-                )
+                raise ServiceError(502, "cart_service_error", "Cart lookup failed")
             version = cart_response.json()["version"]
-            add_headers = {**headers, "If-Match-Version": str(version)}
+            add_headers = {
+                **headers,
+                "If-Match-Version": str(version),
+                "Idempotency-Key": self._add_item_idempotency_key(
+                    product_id, variant_id, quantity
+                ),
+            }
             response = await client.post(
                 "/api/v1/cart/items",
                 headers=add_headers,
@@ -295,6 +330,68 @@ class CartClient:
             )
         if response.status_code >= 400:
             raise ServiceError(502, "cart_service_error", "Add to cart failed")
+        return response.json()
+
+    async def remove_item(
+        self,
+        access_token: str,
+        product_id: str,
+        variant_id: str,
+        request_id: str | None,
+    ) -> dict | None:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        if request_id:
+            headers["X-Request-ID"] = request_id
+        owns_client = self._client is None
+        client = self._client or httpx.AsyncClient(
+            base_url=self.settings.cart_service_url,
+            timeout=self.settings.downstream_timeout_seconds,
+        )
+        start = time.monotonic()
+        try:
+            cart_response = await client.get("/api/v1/cart", headers=headers)
+            if cart_response.status_code == 401:
+                raise ServiceError(
+                    401,
+                    "cart_service_unauthorized",
+                    "Access token was rejected by Cart Service",
+                )
+            if cart_response.status_code >= 400:
+                raise ServiceError(502, "cart_service_error", "Cart lookup failed")
+            cart = cart_response.json()
+            item = next(
+                (
+                    i
+                    for i in cart["items"]
+                    if i["product_id"] == product_id and i["variant_id"] == variant_id
+                ),
+                None,
+            )
+            if item is None:
+                return None
+            remove_headers = {**headers, "If-Match-Version": str(cart["version"])}
+            response = await client.delete(
+                f"/api/v1/cart/items/{item['id']}", headers=remove_headers
+            )
+        except httpx.RequestError as exc:
+            _log_downstream("cart-service", "remove_item", None, start, request_id)
+            raise ServiceError(
+                503, "cart_service_unavailable", "Cart Service is unavailable"
+            ) from exc
+        finally:
+            if owns_client:
+                await client.aclose()
+        _log_downstream(
+            "cart-service", "remove_item", response.status_code, start, request_id
+        )
+        if response.status_code == 401:
+            raise ServiceError(
+                401,
+                "cart_service_unauthorized",
+                "Access token was rejected by Cart Service",
+            )
+        if response.status_code >= 400:
+            raise ServiceError(502, "cart_service_error", "Remove from cart failed")
         return response.json()
 
 

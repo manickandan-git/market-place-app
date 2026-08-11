@@ -91,18 +91,19 @@ async def run_agent_loop(
         # Extract only the tool use blocks
         tool_blocks = [b for b in response.content if b.type == "tool_use"]
 
-        # Claude could otherwise batch multiple add_to_cart calls in one
-        # turn; cap write tools to one per turn. Every tool_use still needs
-        # a matching tool_result (Anthropic API requirement), so rejected
-        # calls get a synthetic error result rather than being dropped.
+        # Claude could otherwise batch multiple write-tool calls (e.g.
+        # add_to_cart + remove_from_cart) in one turn; cap write tools to
+        # one per turn. Every tool_use still needs a matching tool_result
+        # (Anthropic API requirement), so rejected calls get a synthetic
+        # error result rather than being dropped.
         write_seen = False
         runnable_blocks = []
-        rejected_ids = []
+        rejected_blocks = []
         for block in tool_blocks:
             spec = TOOLS_BY_NAME.get(block.name)
             if spec and spec.is_write:
                 if write_seen:
-                    rejected_ids.append(block.id)
+                    rejected_blocks.append(block)
                     continue
                 write_seen = True
             runnable_blocks.append(block)
@@ -116,17 +117,20 @@ async def run_agent_loop(
             )
         )
         stats.tool_calls.extend(
-            {"name": "add_to_cart", "success": False, "rejected": True}
-            for _ in rejected_ids
+            {"name": block.name, "success": False, "rejected": True}
+            for block in rejected_blocks
         )
         tool_results_content = list(tool_results_content) + [
             {
                 "type": "tool_result",
-                "tool_use_id": tool_id,
-                "content": "Only one cart update is allowed per turn.",
+                "tool_use_id": block.id,
+                "content": (
+                    f"Only one write action is allowed per turn — "
+                    f"'{block.name}' was skipped."
+                ),
                 "is_error": True,
             }
-            for tool_id in rejected_ids
+            for block in rejected_blocks
         ]
 
         # Commit the tool outcome layer back to conversation history

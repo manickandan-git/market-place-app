@@ -10,7 +10,11 @@ async def _empty_receive() -> dict:
     return {"type": "http.request", "body": b"", "more_body": False}
 
 
-def _make_request(method: str = "GET", path: str = "/api/v1/products") -> Request:
+def _make_request(
+    method: str = "GET",
+    path: str = "/api/v1/products",
+    client: tuple[str, int] | None = ("203.0.113.7", 54321),
+) -> Request:
     scope = {
         "type": "http",
         "method": method,
@@ -19,6 +23,7 @@ def _make_request(method: str = "GET", path: str = "/api/v1/products") -> Reques
         "query_string": b"",
         "headers": [],
         "state": {"request_id": "test-request-id"},
+        "client": client,
     }
     return Request(scope, receive=_empty_receive)
 
@@ -78,6 +83,35 @@ async def test_circuit_opens_after_threshold_and_fails_fast_without_network():
         assert exc.status_code == 503
         assert exc.code == "circuit_open"
     assert call_count == 2
+
+    await client.aclose()
+
+
+async def test_forward_sets_x_forwarded_for_to_real_client_ip():
+    # Without this, every upstream service sees this gateway's own
+    # docker-network IP as request.client.host for every proxied request —
+    # assistant-service's anonymous-traffic rate limit relies on this header
+    # to distinguish one signed-out guest from another (docs/guardrails.md
+    # finding E in services/assistant-service).
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["x-forwarded-for"] = request.headers.get("x-forwarded-for", "")
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    settings = Settings(
+        circuit_breaker_failure_threshold=1, circuit_breaker_cooldown_seconds=30
+    )
+    service = ProxyService(client, settings)
+
+    await service.forward(
+        _make_request(client=("203.0.113.7", 54321)),
+        "http://fake-product-service",
+        "product_service_url",
+    )
+
+    assert captured["x-forwarded-for"] == "203.0.113.7"
 
     await client.aclose()
 

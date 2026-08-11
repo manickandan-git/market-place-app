@@ -59,6 +59,15 @@ class ProxyService:
             if key.lower() not in HOP_BY_HOP_HEADERS
         }
         headers["X-Request-ID"] = getattr(request.state, "request_id", "") or ""
+        # Every proxied request otherwise arrives at the upstream service
+        # from this gateway's own docker-network IP, not the real caller's
+        # — for assistant-service's anonymous-traffic rate limit
+        # (ChatRateLimitMiddleware._client_key()) this collapsed every
+        # signed-out guest into one shared bucket. This gateway is the only
+        # hop in front of any service, so a single value (not appending to
+        # an existing chain) is correct here.
+        if request.client:
+            headers["X-Forwarded-For"] = request.client.host
         body = await request.body()
 
         try:

@@ -204,32 +204,79 @@ with a `500`, confirmed live before the fix. Now reads `block.type`
 CI instead of only being caught by a live curl check.
 
 **B. Non-idempotent write can double-apply if the #6 timeout fires
-mid-flight.** `asyncio.wait_for` in `chat.py` cancels `run_agent_loop` on
-timeout, including a downstream `add_to_cart` POST already in flight. The
-buyer gets a `504`, but cart-service may have already applied it; a retry
-has no idempotency key to prevent adding the item twice. Not fixed —
-tradeoff between complexity (needs an idempotency key threaded through
-cart-service's `add_item`) and how likely a `add_to_cart` call is to
-actually approach the 45s ceiling.
+mid-flight — fixed.** `asyncio.wait_for` in `chat.py` cancels
+`run_agent_loop` on timeout, including a downstream `add_to_cart` POST
+already in flight. The buyer gets a `504`, but cart-service may have
+already applied it. The realistic risk isn't a mechanical HTTP retry —
+this stack deliberately has none anywhere (see `ProxyService`'s own "no
+retries" docstring) — it's the *buyer* noticing the failure and asking
+again, which makes Claude call `add_to_cart` fresh in a later turn with no
+memory of the first attempt.
 
-**C. Frontend doesn't prune history to match the #4 server-side cap.**
-`ChatRequest.messages` caps at 40, but `ChatWidget.tsx`'s `messages` state
-grows unbounded and `chat.ts` resends the full history every turn. Past 40
-messages, every subsequent call permanently `422`s, and `chat.ts`'s
-`!response.ok` check collapses that into a generic "temporarily
-unavailable" with no recovery path short of losing the conversation. Fix
-belongs in `ChatWidget.tsx` (cap/window the messages sent) or `chat.ts`.
+**Fix, and better news than this finding first suggested:**
+`services/cart-service`'s `add_item` (`app/services/cart_service.py:183`)
+already has full idempotency support — pass an `Idempotency-Key` header,
+and a repeat with the same key + same request body returns the cached cart
+instead of double-adding (a different body with the same key correctly
+409s). The gap was entirely on this side: `CartClient.add_item`
+(`app/clients.py`) never sent that header. Since the risk is a *later
+conversational turn*, not a literal retry, a random key per call wouldn't
+help — the fix is `CartClient._add_item_idempotency_key()`, a
+**content-derived** key: `sha256(product_id:variant_id:quantity:time_bucket)`,
+where `time_bucket = floor(now / cart_add_idempotency_window_seconds)`
+(new `Settings` field, default 60s — comfortably covers the 45s chat
+timeout plus a beat for the buyer to react). Two `add_to_cart` calls for
+the same item within the same window collide onto the same key; cart-service's
+existing dedup does the rest. cart-service scopes idempotency keys
+per-actor server-side, so nothing about caller identity needs to be in the
+key itself. Tradeoff worth naming: a *genuinely intended* second add of
+the same item within the window gets silently merged into the first
+instead of adding twice — accepted as the right default given how
+narrow the window is and how unlikely that specific ordering is in a chat
+UI. `tests/test_clients.py` (new `CartClient` coverage, previously none)
+covers: the header is sent and is a 64-char hex digest; identical calls
+within the window get the same key; different quantity/product get
+different keys; and (via `monkeypatch` on `time.time`) the key changes once
+the window elapses.
 
-**D. Write-tool-cap rejection message is cart-specific.** `loop.py`'s
-synthetic rejection for a capped write call is hardcoded to `"Only one
-cart update is allowed per turn."`, but `ToolSpec.is_write` is meant to
-gate any future write tool. Low severity today (only one write tool
-exists) — worth generalizing the message (e.g. include the tool name) when
-a second write tool is added.
+**C. Frontend doesn't prune history to match the #4 server-side cap —
+fixed.** `ChatRequest.messages` caps at 40, but `ChatWidget.tsx`'s
+`messages` state grew unbounded and `chat.ts` resent the full history
+every turn. Past 40 messages, every subsequent call would permanently
+`422`, and `chat.ts`'s `!response.ok` check collapses that into a generic
+"temporarily unavailable" with no recovery path short of losing the
+conversation.
+
+**Fix:** `apps/web/src/lib/actions/chat.ts`'s new `windowHistory()`,
+applied to the array right before it's sent (`ChatWidget.tsx`'s own
+`messages` state — what's rendered — is untouched, so the buyer never
+sees their history disappear, only what the model re-reads on later
+turns). Trims from the *front* two messages at a time (one full
+user+assistant pair), not a plain tail slice: the array always starts with
+`"user"` and strictly alternates (a Messages API requirement), and an
+arbitrary `.slice(-40)` could land the window on an `"assistant"` turn
+depending on parity. No test framework is wired up in `apps/web` yet
+(`package.json` has no `test` script) — verified instead with a
+standalone script exercising several history lengths (0, 1, 19, 20, 21,
+50, 100 round trips), confirming the output always stays ≤40, starts with
+`"user"`, and preserves the latest pending turn.
+
+**D. Write-tool-cap rejection message is cart-specific — fixed.** `loop.py`'s
+synthetic rejection for a capped write call was hardcoded to `"Only one
+cart update is allowed per turn."`, and the matching stats entry was
+hardcoded to `{"name": "add_to_cart", ...}` regardless of which tool was
+actually rejected. `remove_from_cart` (`is_write=True`) became the second
+write tool, making this live: if Claude requested both in one turn, the
+rejected one would be misreported as `add_to_cart` either way. Fix: the
+rejected-blocks loop now tracks the actual `block` (not just `block.id`),
+so both the rejection message and the stats entry use the real tool name —
+`f"Only one write action is allowed per turn — '{block.name}' was
+skipped."` No dedicated test exists for the write-cap mechanism itself
+(same gap noted for finding A) — worth a `test_loop.py` covering it.
 
 **E. The #3 rate limit's "per-caller" claim doesn't hold for anonymous
 traffic behind the gateway — it's effectively one shared bucket for every
-guest.** `ChatRateLimitMiddleware._client_key()` falls back to
+guest — fixed.** `ChatRateLimitMiddleware._client_key()` falls back to
 `request.client.host` when there's no bearer token. But api-gateway proxies
 every request to assistant-service without forwarding the real client IP
 (no `X-Forwarded-For` or equivalent — checked `services/api-gateway/app/services/routing.py`,
@@ -249,10 +296,16 @@ generic "The assistant is temporarily unavailable." (`chat.ts`'s
 Confirmed by waiting for the 60s window to roll over — requests succeeded
 again immediately after, with no code change.
 
-**Not fixed yet — candidate approaches, to weigh before picking one:**
-1. Have api-gateway set `X-Forwarded-For` (or similar) on proxied requests,
-   and have `_client_key()` prefer that header when present. Most correct,
-   but touches api-gateway too, not just this service.
+**Fix: approach 1 of the three weighed below** — api-gateway now sets
+`X-Forwarded-For` to `request.client.host` on every proxied request
+(`services/api-gateway/app/services/proxy_service.py`'s `forward()`,
+alongside the existing `X-Request-ID` injection — a single value, not an
+append-to-existing-chain, since this gateway is the only hop in front of
+any service). `_client_key()` now prefers that header when present,
+falling back to `request.client.host` only when testing this service
+directly (bypassing the gateway, where there's no `X-Forwarded-For` to
+trust). The other two approaches below were the alternatives considered,
+not pursued:
 2. Key anonymous traffic by something gateway-visible instead of IP — e.g.
    a per-browser-session identifier the frontend generates and sends as a
    header/cookie. No gateway change needed, but adds client-side state.
@@ -261,16 +314,19 @@ again immediately after, with no code change.
    server-wide, just not per-guest) and raise the limit/window instead of
    trying to distinguish individual guests. Cheapest, but weakest.
 
-Needs a test (`test_rate_limit.py` doesn't exist yet) covering: two
-different bearer tokens each get their own bucket (already true today);
-two anonymous requests through a simulated proxy without a distinguishing
-header share one bucket (the bug, to guard against regressing further, or
-to prove fixed once one of the approaches above lands).
+`tests/test_rate_limit.py` (new) covers `_client_key()` directly: two
+different bearer tokens get different keys; `X-Forwarded-For` is preferred
+over `request.client.host` when both are present; two anonymous callers
+with different `X-Forwarded-For` values get different keys (the bug this
+fixes — both previously collapsed to the same gateway-address key); the
+`request.client.host` fallback still works with no `X-Forwarded-For`; and
+one `dispatch()`-level test proving two anonymous callers sharing
+`request.client.host` (as they always do behind the gateway) get
+independent 429 limits. `services/api-gateway/tests/test_proxy_service.py`
+gained a matching test asserting `forward()` actually sets the header.
 
 ## Priority order
 
-All of #1-9 are fixed. Of the new findings: A is fixed (was the most
-severe — broke the whole feature); C and E are the next real user-facing
-gaps (C: silent permanent breakage past 40 messages; E: anonymous users
-can rate-limit each other) — both worth doing before this is exposed
-beyond localhost; B and D are lower urgency design tradeoffs.
+All of #1-9 are fixed, and so are all five new findings (A-E). Nothing
+open remains on this list — the next gap worth watching for is whatever a
+future review of the code surfaces, not anything tracked here.
