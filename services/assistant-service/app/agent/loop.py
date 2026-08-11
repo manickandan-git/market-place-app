@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -11,6 +12,20 @@ from app.tools import TOOLS, TOOLS_BY_NAME
 from app.tools.types import ToolContext
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ChatLoopStats:
+    """Metadata about one run_agent_loop call, for the per-request log line
+    in chat.py. Counts/names/outcomes only — never message content or tool
+    results (see docs/observability.md's "what to deliberately not log")."""
+
+    loop_iterations: int = 0
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    stop_reason: str | None = None
+    forced_final_turn: bool = False
 
 _settings = get_settings()
 anthropic_client = AsyncAnthropic(api_key=_settings.anthropic_api_key)
@@ -41,13 +56,14 @@ async def run_agent_loop(
     messages: list[dict[str, Any]],
     context: ToolContext,
     max_loops: int = 5,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], ChatLoopStats]:
     """
     Executes the Anthropic multi-turn tool use loop.
     Appends responses directly to the provided messages list.
     """
     anthropic_tools = [t.to_anthropic_tool() for t in TOOLS]
     loop_count = 0
+    stats = ChatLoopStats()
 
     while loop_count < max_loops:
         loop_count += 1
@@ -60,13 +76,17 @@ async def run_agent_loop(
             tools=anthropic_tools,
             messages=messages,
         )
+        stats.input_tokens += response.usage.input_tokens
+        stats.output_tokens += response.usage.output_tokens
 
         # Inject Claude's response into the history
         messages.append({"role": "assistant", "content": response.content})
 
         # Base case: Claude completed without any tool requests
         if response.stop_reason != "tool_use":
-            return messages
+            stats.loop_iterations = loop_count
+            stats.stop_reason = response.stop_reason
+            return messages, stats
 
         # Extract only the tool use blocks
         tool_blocks = [b for b in response.content if b.type == "tool_use"]
@@ -89,6 +109,16 @@ async def run_agent_loop(
 
         tasks = [run_single_tool(block, context) for block in runnable_blocks]
         tool_results_content = await asyncio.gather(*tasks)
+        stats.tool_calls.extend(
+            {"name": block.name, "success": not result.get("is_error", False)}
+            for block, result in zip(
+                runnable_blocks, tool_results_content, strict=True
+            )
+        )
+        stats.tool_calls.extend(
+            {"name": "add_to_cart", "success": False, "rejected": True}
+            for _ in rejected_ids
+        )
         tool_results_content = list(tool_results_content) + [
             {
                 "type": "tool_result",
@@ -117,8 +147,13 @@ async def run_agent_loop(
         tools=anthropic_tools,
         messages=messages,
     )
+    stats.input_tokens += final_response.usage.input_tokens
+    stats.output_tokens += final_response.usage.output_tokens
+    stats.loop_iterations = loop_count
+    stats.stop_reason = final_response.stop_reason
+    stats.forced_final_turn = True
     messages.append({"role": "assistant", "content": final_response.content})
-    return messages
+    return messages, stats
 
 
 async def run_single_tool(block: Any, context: ToolContext) -> dict[str, Any]:
@@ -145,6 +180,16 @@ async def run_single_tool(block: Any, context: ToolContext) -> dict[str, Any]:
             "content": json.dumps(result_dict, default=str),
         }
     except ServiceError as err:
+        # Previously invisible: surfaced to Claude as a tool_result string
+        # but never logged. code/status_code only (never err.message, which
+        # can echo request content) — see docs/observability.md item 5.
+        logger.warning(
+            "Tool '%s' downstream failure code=%s status=%s (request_id=%s)",
+            tool_name,
+            err.code,
+            err.status_code,
+            context.request_id,
+        )
         # Gracefully handle downstream failures without killing the turn
         return {
             "type": "tool_result",

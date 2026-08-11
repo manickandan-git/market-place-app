@@ -609,6 +609,48 @@ services:
         condition: service_started
       marketplace-order-service:
         condition: service_started
+  # 23. Observability stack (dev) — Loki aggregates every container's
+  # stdout/stderr (via Promtail, using Docker service discovery so new
+  # services are picked up automatically, no per-service config needed),
+  # Grafana provides the search/dashboard UI over it. Closes the
+  # "no logging, metrics, or tracing infrastructure anywhere" gap noted in
+  # the root CLAUDE.md. No host ports published here on purpose, same
+  # convention as every other internal service — see
+  # docker-compose.override.yml for Grafana's dev-only port.
+  marketplace-loki:
+    image: grafana/loki:2.9.6
+    container_name: marketplace-loki
+    volumes:
+      - ./infrastructure/monitoirng/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - marketplace_loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+
+  marketplace-promtail:
+    image: grafana/promtail:2.9.6
+    container_name: marketplace-promtail
+    volumes:
+      - ./infrastructure/monitoirng/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - marketplace-loki
+
+  marketplace-grafana:
+    image: grafana/grafana:11.1.0
+    container_name: marketplace-grafana
+    environment:
+      # Dev-only convenience: anonymous viewers get Admin so there's no
+      # login step to explore logs locally. Do not carry this into any
+      # non-local deployment.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./infrastructure/monitoirng/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - marketplace_grafana_data:/var/lib/grafana
+    depends_on:
+      - marketplace-loki
+
 # Named volumes block tells Docker where to store the database files on your host machine safely
 volumes:
   marketplace_auth_service_postgres_data:
@@ -621,3 +663,5 @@ volumes:
   marketplace_cart_service_postgres_data:
   marketplace_order_service_postgres_data:
   marketplace_assistant_service_postgres_data:
+  marketplace_loki_data:
+  marketplace_grafana_data:

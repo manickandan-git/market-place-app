@@ -1,7 +1,13 @@
+import logging
+import time
+
 import httpx
 
 from app.config import Settings
+from app.event_logger import log_event
 from app.exceptions import ServiceError
+
+logger = logging.getLogger(__name__)
 
 
 class ProductClient:
@@ -23,17 +29,25 @@ class ProductClient:
             params["q"] = query
         if category_id:
             params["category_id"] = category_id
+        start = time.monotonic()
         try:
             response = await client.get(
                 "/api/v1/products", params=params, headers=headers
             )
         except httpx.RequestError as exc:
+            _log_downstream(
+                "product-service", "search_products", None, start, request_id
+            )
             raise ServiceError(
                 503, "product_service_unavailable", "Product Service is unavailable"
             ) from exc
         finally:
             if owns_client:
                 await client.aclose()
+        _log_downstream(
+            "product-service", "search_products", response.status_code, start,
+            request_id,
+        )
         if response.status_code >= 400:
             raise ServiceError(502, "product_service_error", "Product search failed")
         return response.json()["items"]
@@ -47,17 +61,25 @@ class ProductClient:
             base_url=self.settings.product_service_url,
             timeout=self.settings.downstream_timeout_seconds,
         )
+        start = time.monotonic()
         try:
             response = await client.get(
                 f"/api/v1/products/by-slug/{slug}", headers=headers
             )
         except httpx.RequestError as exc:
+            _log_downstream(
+                "product-service", "get_product_by_slug", None, start, request_id
+            )
             raise ServiceError(
                 503, "product_service_unavailable", "Product Service is unavailable"
             ) from exc
         finally:
             if owns_client:
                 await client.aclose()
+        _log_downstream(
+            "product-service", "get_product_by_slug", response.status_code, start,
+            request_id,
+        )
         if response.status_code == 404:
             return None
         if response.status_code >= 400:
@@ -71,15 +93,23 @@ class ProductClient:
             base_url=self.settings.product_service_url,
             timeout=self.settings.downstream_timeout_seconds,
         )
+        start = time.monotonic()
         try:
             response = await client.get("/api/v1/categories", headers=headers)
         except httpx.RequestError as exc:
+            _log_downstream(
+                "product-service", "list_categories", None, start, request_id
+            )
             raise ServiceError(
                 503, "product_service_unavailable", "Product Service is unavailable"
             ) from exc
         finally:
             if owns_client:
                 await client.aclose()
+        _log_downstream(
+            "product-service", "list_categories", response.status_code, start,
+            request_id,
+        )
         if response.status_code >= 400:
             raise ServiceError(502, "product_service_error", "Category list failed")
         return response.json()
@@ -99,9 +129,13 @@ class InventoryClient:
             base_url=self.settings.inventory_service_url,
             timeout=self.settings.downstream_timeout_seconds,
         )
+        start = time.monotonic()
         try:
             response = await client.get(f"/api/v1/availability/{sku}", headers=headers)
         except httpx.RequestError as exc:
+            _log_downstream(
+                "inventory-service", "get_availability", None, start, request_id
+            )
             raise ServiceError(
                 503,
                 "inventory_service_unavailable",
@@ -110,6 +144,10 @@ class InventoryClient:
         finally:
             if owns_client:
                 await client.aclose()
+        _log_downstream(
+            "inventory-service", "get_availability", response.status_code, start,
+            request_id,
+        )
         if response.status_code >= 400:
             raise ServiceError(
                 502, "inventory_service_error", "Availability lookup failed"
@@ -131,15 +169,20 @@ class OrderClient:
             base_url=self.settings.order_service_url,
             timeout=self.settings.downstream_timeout_seconds,
         )
+        start = time.monotonic()
         try:
             response = await client.get("/api/v1/orders", headers=headers)
         except httpx.RequestError as exc:
+            _log_downstream("order-service", "get_my_orders", None, start, request_id)
             raise ServiceError(
                 503, "order_service_unavailable", "Order Service is unavailable"
             ) from exc
         finally:
             if owns_client:
                 await client.aclose()
+        _log_downstream(
+            "order-service", "get_my_orders", response.status_code, start, request_id
+        )
         if response.status_code == 401:
             raise ServiceError(
                 401,
@@ -161,15 +204,20 @@ class OrderClient:
             base_url=self.settings.order_service_url,
             timeout=self.settings.downstream_timeout_seconds,
         )
+        start = time.monotonic()
         try:
             response = await client.get(f"/api/v1/orders/{order_id}", headers=headers)
         except httpx.RequestError as exc:
+            _log_downstream("order-service", "get_order", None, start, request_id)
             raise ServiceError(
                 503, "order_service_unavailable", "Order Service is unavailable"
             ) from exc
         finally:
             if owns_client:
                 await client.aclose()
+        _log_downstream(
+            "order-service", "get_order", response.status_code, start, request_id
+        )
         if response.status_code == 401:
             raise ServiceError(
                 401,
@@ -204,6 +252,7 @@ class CartClient:
             base_url=self.settings.cart_service_url,
             timeout=self.settings.downstream_timeout_seconds,
         )
+        start = time.monotonic()
         try:
             cart_response = await client.get("/api/v1/cart", headers=headers)
             if cart_response.status_code == 401:
@@ -228,12 +277,16 @@ class CartClient:
                 },
             )
         except httpx.RequestError as exc:
+            _log_downstream("cart-service", "add_item", None, start, request_id)
             raise ServiceError(
                 503, "cart_service_unavailable", "Cart Service is unavailable"
             ) from exc
         finally:
             if owns_client:
                 await client.aclose()
+        _log_downstream(
+            "cart-service", "add_item", response.status_code, start, request_id
+        )
         if response.status_code == 401:
             raise ServiceError(
                 401,
@@ -243,3 +296,21 @@ class CartClient:
         if response.status_code >= 400:
             raise ServiceError(502, "cart_service_error", "Add to cart failed")
         return response.json()
+
+
+def _log_downstream(
+    service: str,
+    operation: str,
+    status_code: int | None,
+    start: float,
+    request_id: str | None,
+) -> None:
+    log_event(
+        logger,
+        "downstream_call",
+        service=service,
+        operation=operation,
+        status_code=status_code,
+        duration_ms=round((time.monotonic() - start) * 1000),
+        request_id=request_id,
+    )

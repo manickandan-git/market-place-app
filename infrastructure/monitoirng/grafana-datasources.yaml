@@ -1,0 +1,12 @@
+# Grafana provisioning file: registers Loki as a datasource automatically
+# on container startup, so there's no manual "Add datasource" click-through
+# for a fresh `docker compose up`.
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://marketplace-loki:3100
+    isDefault: true
+    editable: false

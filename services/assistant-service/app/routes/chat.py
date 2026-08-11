@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import time
 from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -6,7 +8,10 @@ from pydantic import BaseModel, Field
 
 from app.agent.loop import run_agent_loop
 from app.config import get_settings
+from app.event_logger import log_event
 from app.tools.types import ToolContext
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -41,16 +46,40 @@ async def chat_endpoint(
 
     # 5. Run the decoupled agent loop
     # Note: messages list is mutated in-place and returned with all turns included
+    start = time.monotonic()
     try:
-        updated_history = await asyncio.wait_for(
+        updated_history, stats = await asyncio.wait_for(
         run_agent_loop(messages=messages, context=context),
         timeout=get_settings().chat_request_timeout_seconds,
     )
     except TimeoutError:
+        log_event(
+            logger,
+            "chat_request",
+            request_id=request_id,
+            authenticated=access_token is not None,
+            outcome="timeout",
+            latency_ms=round((time.monotonic() - start) * 1000),
+        )
         raise HTTPException(
         status_code=504,
         detail="The assistant took too long to respond. Please try again.",
     ) from None
+
+    log_event(
+        logger,
+        "chat_request",
+        request_id=request_id,
+        authenticated=access_token is not None,
+        outcome="completed",
+        loop_iterations=stats.loop_iterations,
+        forced_final_turn=stats.forced_final_turn,
+        tool_calls=stats.tool_calls,
+        stop_reason=stats.stop_reason,
+        latency_ms=round((time.monotonic() - start) * 1000),
+        input_tokens=stats.input_tokens,
+        output_tokens=stats.output_tokens,
+    )
 
     # Extract the plain-text reply from the final assistant turn's content
     # blocks, rather than returning the raw block objects to the caller.

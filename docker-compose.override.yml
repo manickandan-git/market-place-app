@@ -79,3 +79,8 @@ services:
   marketplace-assistant-service:
     ports:
       - "8012:8012"
+  # 3000 is taken by apps/web's own dev server (a separate, non-Docker
+  # process) — Grafana's UI is published on 3300 instead.
+  marketplace-grafana:
+    ports:
+      - "3300:3000"

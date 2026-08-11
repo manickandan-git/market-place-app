@@ -1,3 +1,4 @@
+import logging
 import time
 from collections import defaultdict, deque
 
@@ -5,6 +6,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.config import get_settings
+from app.event_logger import log_event
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRateLimitMiddleware(BaseHTTPMiddleware):
@@ -51,6 +55,21 @@ class ChatRateLimitMiddleware(BaseHTTPMiddleware):
 
         if len(hits) >= self._limit:
             retry_after = max(1, int(self._window_seconds - (now - hits[0])))
+            # CorrelationIdMiddleware sits inside this middleware in the
+            # actual stack (Starlette wraps in reverse of add_middleware()
+            # call order) and never runs at all for a short-circuited 429
+            # (call_next is never invoked) — request.state.request_id
+            # wouldn't exist here. Read the incoming header directly instead,
+            # same fallback CorrelationIdMiddleware itself uses.
+            # key is "token:<raw bearer token>" or "ip:<address>" — only the
+            # type prefix is safe to log, never the raw key itself.
+            log_event(
+                logger,
+                "chat_rate_limited",
+                key_type=key.split(":", 1)[0],
+                retry_after=retry_after,
+                request_id=request.headers.get("X-Request-ID"),
+            )
             return JSONResponse(
                 status_code=429,
                 content={
