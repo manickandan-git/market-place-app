@@ -1,8 +1,8 @@
 # Seller Portal
 
 Angular app for sellers to manage their own catalog, stock, orders, and
-shipments. Buyer-facing storefront (`apps/web`, Next.js) is a separate app —
-see `apps/web/AGENTS.md` for why they aren't merged. This is a planning doc,
+shipments. Buyer-facing storefront (`apps/buyer-portal`, Next.js) is a separate app —
+see `apps/buyer-portal/AGENTS.md` for why they aren't merged. This is a planning doc,
 written before implementation; sections will be filled in / corrected as
 decisions get made.
 
@@ -28,7 +28,7 @@ Phase 1 feature set:
 
 ## Backend integration
 
-All calls go through `api-gateway` (`:9000`), the same pattern `apps/web`
+All calls go through `api-gateway` (`:9000`), the same pattern `apps/buyer-portal`
 uses — single origin, gateway handles allowlisting/CORS/circuit-breaking;
 downstream services still do their own JWT + role/ownership checks
 unchanged.
@@ -48,7 +48,7 @@ origin addition (see below):
 
 **Gateway change required:** add the seller portal's dev/prod origin to
 `cors_origins` in `services/api-gateway/app/config.py` (currently defaults
-to `["http://localhost:3000"]`, i.e. just `apps/web`).
+to `["http://localhost:3000"]`, i.e. just `apps/buyer-portal`).
 
 **Backend blocker — order-service has no seller-facing order endpoint.**
 Verified against source (2026-08-11), not just the allowlist doc:
@@ -78,11 +78,11 @@ discovered while building them.
 
 ## Auth
 
-JWTs come from `auth-service` exactly like `apps/web` (`POST /auth/login`,
+JWTs come from `auth-service` exactly like `apps/buyer-portal` (`POST /auth/login`,
 `POST /auth/token`, `POST /auth/refresh`), gated to accounts with the
 `seller` role.
 
-**Difference from `apps/web` that matters:** `apps/web` stores tokens
+**Difference from `apps/buyer-portal` that matters:** `apps/buyer-portal` stores tokens
 server-side via httpOnly cookies set through Next.js server
 actions/route handlers (`src/lib/session.ts`, `src/proxy.ts`) — there's no
 server tier to do that in an Angular SPA. Options to decide between before
@@ -94,12 +94,12 @@ building the auth module:
 2. Access + refresh tokens both in browser storage (`localStorage` or
    `sessionStorage`) — simplest to implement, weaker against XSS.
 
-Leaning toward (1) for parity with how `apps/web` avoids putting tokens in
+Leaning toward (1) for parity with how `apps/buyer-portal` avoids putting tokens in
 JS-reachable storage, but this is a real tradeoff to make deliberately, not
 copy blindly — revisit once auth-service's refresh-token/cookie support for
 non-Next.js clients is confirmed.
 
-`src/lib/jwt.ts` in `apps/web` (decode-without-verify, used only for
+`src/lib/jwt.ts` in `apps/buyer-portal` (decode-without-verify, used only for
 proactive-refresh timing) is small and framework-agnostic enough to port
 as-is if useful.
 
@@ -116,7 +116,7 @@ as-is if useful.
 ## Deployment
 
 New sibling app under `apps/`, own `package.json`, own `Dockerfile`, own
-port (TBD — `apps/web` currently runs on `3001` in Docker / `3000` locally
+port (TBD — `apps/buyer-portal` currently runs on `3001` in Docker / `3000` locally
 per recent compose changes, so pick something that doesn't collide), own
 entry in the root `docker-compose.yml`.
 

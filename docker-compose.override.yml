@@ -85,10 +85,10 @@ services:
   # side by side, without needing to stop one to start the other. If you
   # only ever use one of the two, feel free to change this to "3000:3000"
   # to match the CORS_ORIGINS=["http://localhost:3000"] settings above.
-  marketplace-web:
+  marketplace-buyer-portal:
     ports:
       - "3001:3000"
-  # apps/web takes 3000 (local) / 3001 (Docker) — Grafana's UI is
+  # apps/buyer-portal takes 3000 (local) / 3001 (Docker) — Grafana's UI is
   # published on 3300 instead.
   marketplace-grafana:
     ports:

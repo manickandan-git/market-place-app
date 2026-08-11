@@ -23,7 +23,7 @@ PostgreSQL database and is independently deployable; the root
 `services/audit-service/` and `services/search-service/` also exist but are
 empty directories — no code, not yet built.
 
-[`apps/web`](apps/web) is the Next.js buyer storefront. It's not a backend
+[`apps/buyer-portal`](apps/buyer-portal) is the Next.js buyer storefront. It's not a backend
 service and owns no database; it talks to the gateway only from server-side
 code (route handlers / Server Components), never directly from the browser.
 
@@ -103,7 +103,7 @@ This starts, in dependency order: each service's Postgres database, Redis
 (auth and notification), the notification Celery worker and mailer
 (`mailpit`, profile `dev`), all ten database-backed API services, the
 api-gateway (no database), the observability stack (Loki/Promtail/Grafana,
-dev-only), and the `apps/web` storefront. Each API container applies its
+dev-only), and the `apps/buyer-portal` storefront. Each API container applies its
 own Alembic migrations on startup.
 
 - auth-service: http://localhost:8001/docs
@@ -117,8 +117,8 @@ own Alembic migrations on startup.
 - shipping-service: http://localhost:8009/docs
 - api-gateway: http://localhost:9000 (proxies the routes above under `/api/v1/*`)
 - assistant-service: http://localhost:8012/docs
-- apps/web storefront: http://localhost:3001 (Docker) — run `npm run dev` in
-  `apps/web` separately for local dev on http://localhost:3000; both can be
+- apps/buyer-portal storefront: http://localhost:3001 (Docker) — run `npm run dev` in
+  `apps/buyer-portal` separately for local dev on http://localhost:3000; both can be
   up at once
 - mailpit (dev email capture, `--profile dev`): http://localhost:8025
 

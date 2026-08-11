@@ -641,25 +641,25 @@ services:
       marketplace-order-service:
         condition: service_started
 
-  # 27. Web frontend (Next.js, BFF pattern — see apps/web/src/lib/config.ts).
+  # 27. Web frontend (Next.js, BFF pattern — see apps/buyer-portal/src/lib/config.ts).
   # Talks to the API gateway only from server-side code (route handlers,
   # Server Components, the proxy) over the Docker network; the browser
   # never calls the gateway directly. Runs `next dev` for hot reload,
   # matching every other service's --reload dev workflow. node_modules and
   # .next are anonymous volumes so the host's (Windows) copies never shadow
-  # the Linux-built ones baked into the image — see apps/web/Dockerfile.
-  marketplace-web:
+  # the Linux-built ones baked into the image — see apps/buyer-portal/Dockerfile.
+  marketplace-buyer-portal:
     build:
-      context: ./apps/web
+      context: ./apps/buyer-portal
       dockerfile: Dockerfile
     environment:
       - NODE_ENV=development
       # Server-side only, never exposed to the browser — see
-      # apps/web/src/lib/config.ts's docstring on why this has no
+      # apps/buyer-portal/src/lib/config.ts's docstring on why this has no
       # NEXT_PUBLIC_ prefix.
       - GATEWAY_URL=http://marketplace-api-gateway:9000
     volumes:
-      - ./apps/web:/app
+      - ./apps/buyer-portal:/app
       - /app/node_modules
       - /app/.next
     command: npm run dev

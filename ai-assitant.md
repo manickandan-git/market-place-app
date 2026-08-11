@@ -3,7 +3,7 @@
 ## Context
 
 The marketplace has 9 backend services behind an API gateway and a complete
-buyer storefront (`apps/web`, Next.js). The user wants to add an agentic AI
+buyer storefront (`apps/buyer-portal`, Next.js). The user wants to add an agentic AI
 layer for product search, pricing, inventory, and policy questions. Locked-in
 decisions from the clarifying round:
 
@@ -50,7 +50,7 @@ These directly shape the design below:
 ## Architecture
 
 ```
-Browser (apps/web)
+Browser (apps/buyer-portal)
   │  chat widget → Route Handler (server-side, same BFF pattern as the rest
   │  of the storefront: attaches Authorization: Bearer <mp_access_token>
   │  from the httpOnly cookie if signed in, omits it for guests)
@@ -170,7 +170,7 @@ this session is scoped per-route and won't block anonymous chat.
 
 ## Frontend integration
 
-- New chat widget in `apps/web` (floating panel or `/assistant` page).
+- New chat widget in `apps/buyer-portal` (floating panel or `/assistant` page).
 - A Route Handler (`app/api/assistant/chat/route.ts`) is the only place that
   attaches the bearer token server-side and streams the response back —
   same "tokens never reach client JS" rule as the rest of the storefront.
@@ -233,7 +233,7 @@ concrete condition under which it would:
 3. Buyer-context tools: `get_my_orders`/`get_order_status`,
    then `add_to_cart` (guest + authenticated paths). Verify a full "find a
    product → check stock → add to cart" conversation end-to-end.
-4. Streaming chat endpoint + `apps/web` widget wired through the Route
+4. Streaming chat endpoint + `apps/buyer-portal` widget wired through the Route
    Handler.
 5. Phase 2: seller-scoped read tools, reusing the same core.
 

@@ -34,7 +34,7 @@
 			"path": "../services/api-gateway"
 		},
 		{
-			"path": "../apps/web"
+			"path": "../apps/buyer-portal"
 		},
 		{
 			"path": "../services/assistant-service"

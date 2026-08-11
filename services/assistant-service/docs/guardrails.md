@@ -8,7 +8,7 @@ behavior. Several things were already solid from the start and never
 needed work:
 - Correlation IDs propagate from `ToolContext.request_id` into every
   downstream tool call's `X-Request-ID` header (`app/clients.py`).
-- The Anthropic API key never reaches the browser — `apps/web`'s
+- The Anthropic API key never reaches the browser — `apps/buyer-portal`'s
   `ChatWidget` calls a server action, not the Anthropic API directly.
 - No PII is ever logged or persisted — the only `print()` in the service is
   a one-time seed script, and assistant-service's own DB holds pgvector
@@ -247,7 +247,7 @@ every turn. Past 40 messages, every subsequent call would permanently
 "temporarily unavailable" with no recovery path short of losing the
 conversation.
 
-**Fix:** `apps/web/src/lib/actions/chat.ts`'s new `windowHistory()`,
+**Fix:** `apps/buyer-portal/src/lib/actions/chat.ts`'s new `windowHistory()`,
 applied to the array right before it's sent (`ChatWidget.tsx`'s own
 `messages` state — what's rendered — is untouched, so the buyer never
 sees their history disappear, only what the model re-reads on later
@@ -255,7 +255,7 @@ turns). Trims from the *front* two messages at a time (one full
 user+assistant pair), not a plain tail slice: the array always starts with
 `"user"` and strictly alternates (a Messages API requirement), and an
 arbitrary `.slice(-40)` could land the window on an `"assistant"` turn
-depending on parity. No test framework is wired up in `apps/web` yet
+depending on parity. No test framework is wired up in `apps/buyer-portal` yet
 (`package.json` has no `test` script) — verified instead with a
 standalone script exercising several history lengths (0, 1, 19, 20, 21,
 50, 100 round trips), confirming the output always stays ≤40, starts with

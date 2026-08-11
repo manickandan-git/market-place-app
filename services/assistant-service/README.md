@@ -18,7 +18,7 @@ cart-service enforces its existing rules unchanged.
 `sentence-transformers` embeddings, chunked and seeded return/shipping/refund
 policy content, cosine-similarity retrieval). The Anthropic Messages API
 tool-use loop (`app/agent/loop.py`) is wired up behind a live
-`POST /api/v1/assistant/chat` endpoint (`app/routes/chat.py`), and `apps/web`'s
+`POST /api/v1/assistant/chat` endpoint (`app/routes/chat.py`), and `apps/buyer-portal`'s
 `ChatWidget.tsx` talks to it through `chat.ts` — this is a plain
 request/response endpoint, not a streaming one, despite the original
 roadmap item 4 below calling for streaming. See Roadmap below for what's
@@ -127,7 +127,7 @@ without signing in. See `services/api-gateway/docs/route-allowlist.md`.
    `add_to_cart` (guest and authenticated paths), all via JWT/cart-token
    relay, no new service credentials.~~ **(done — `remove_from_cart` was
    added alongside `add_to_cart` as a second write tool)**
-4. ~~Chat endpoint (`POST /api/v1/assistant/chat`) and the `apps/web` chat
+4. ~~Chat endpoint (`POST /api/v1/assistant/chat`) and the `apps/buyer-portal` chat
    widget.~~ **(done, as a plain request/response endpoint — not the
    streaming one originally scoped here; revisit streaming if response
    latency becomes a problem)**

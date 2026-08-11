@@ -20,7 +20,7 @@ test-results/
 *.pyc
 .git
 
-# Node / Next.js (apps/web)
+# Node / Next.js (apps/buyer-portal)
 node_modules/
 .next/
 .env.local
