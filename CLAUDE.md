@@ -21,6 +21,13 @@ is a separate `uv` project that exercises the running services over real HTTP.
 | order-service | 8007 | Checkout order snapshots and order lifecycle |
 | payment-service | 8008 | Stripe payment authorization, capture, and refunds |
 | shipping-service | 8009 | Shipment records, carrier/tracking info, drives Order's fulfillment callback |
+| api-gateway | 9000 | Reverse proxy fronting every public route: allowlisting, CORS, correlation IDs, per-request timeouts, per-upstream circuit breaker, fail-fast JWT signature/expiry check (not authorization). No database, no business logic — breaks the FastAPI+PostgreSQL pattern above by design. |
+| assistant-service | 8012 | Buyer-facing agentic AI chat (Claude tool-use over the Anthropic Messages API): catalog search, availability, policy Q&A (pgvector RAG), a buyer's own orders, and add/remove-cart writes relayed through the buyer's own JWT. Owns no product/inventory/cart/order data itself. |
+
+`services/audit-service/` and `services/search-service/` exist as empty
+directories only (no code, not even a scaffold) — do not treat them as
+implemented services or add ports/endpoints for them until something is
+actually built there.
 
 `auth-service` (the Identity Service) is the sole authority for credentials,
 roles, sessions, and JWT issuance. Every other service validates
@@ -86,7 +93,8 @@ uv run ruff format .                       # format
 
 Every service also exposes these via `make install|run|test|lint|format|migrate|docker-up|docker-down`
 (and `make check` = lint + test) — targets and port numbers are consistent
-across all eight services.
+across all ten database-backed services (everything in the table above
+except `api-gateway`, which has no database and so no `migrate` target).
 
 ### Full stack (Docker)
 

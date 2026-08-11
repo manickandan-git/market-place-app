@@ -3,23 +3,26 @@
 Agentic AI assistant for the marketplace storefront. A buyer-facing chat
 loop (Claude tool-use over the Anthropic Messages API) that can search the
 catalog, check availability, answer policy questions, look up a buyer's own
-orders, and add items to a buyer's own cart. It owns no product, inventory,
-cart, or order data — every tool call either reads from the owning service
-over HTTP or, for the one write action (`add_to_cart`), relays the buyer's
-own JWT into cart-service so cart-service enforces its existing rules
-unchanged.
+orders, and add or remove items in a buyer's own cart. It owns no product,
+inventory, cart, or order data — every tool call either reads from the
+owning service over HTTP or, for its two write actions (`add_to_cart`,
+`remove_from_cart`), relays the buyer's own JWT into cart-service so
+cart-service enforces its existing rules unchanged.
 
 ## Status
 
-**Phases 1 and 2 are complete.** Five tools are implemented and tested
+**Phases 1-4 are complete.** Nine tools are implemented and tested
 (`search_products`, `get_product`, `list_categories`, `get_availability`,
-`get_policy`), backed by a working pgvector RAG pipeline (local
+`get_policy`, `get_my_orders`, `get_order_status`, `add_to_cart`,
+`remove_from_cart`), backed by a working pgvector RAG pipeline (local
 `sentence-transformers` embeddings, chunked and seeded return/shipping/refund
-policy content, cosine-similarity retrieval). There is still no chat
-endpoint or agent loop yet — the tools exist as directly-callable,
-unit-tested Python functions (`app/tools/`) but nothing wires them into the
-Anthropic Messages API tool-use loop. This service currently exposes only
-`/health` and `/ready` over HTTP. See Roadmap below for what's next.
+policy content, cosine-similarity retrieval). The Anthropic Messages API
+tool-use loop (`app/agent/loop.py`) is wired up behind a live
+`POST /api/v1/assistant/chat` endpoint (`app/routes/chat.py`), and `apps/web`'s
+`ChatWidget.tsx` talks to it through `chat.ts` — this is a plain
+request/response endpoint, not a streaming one, despite the original
+roadmap item 4 below calling for streaming. See Roadmap below for what's
+next.
 
 ## Local ports
 
@@ -120,11 +123,14 @@ without signing in. See `services/api-gateway/docs/route-allowlist.md`.
    `list_categories`, `get_availability` — plus a pgvector-backed RAG
    pipeline (local `sentence-transformers` embeddings, chunked policy
    content) for `get_policy`.~~ **(done)**
-3. Buyer-context tools — `get_my_orders`, `get_order_status`, then
+3. ~~Buyer-context tools — `get_my_orders`, `get_order_status`, then
    `add_to_cart` (guest and authenticated paths), all via JWT/cart-token
-   relay, no new service credentials.
-4. Streaming chat endpoint (`POST /api/v1/assistant/chat`) and the
-   `apps/web` chat widget.
+   relay, no new service credentials.~~ **(done — `remove_from_cart` was
+   added alongside `add_to_cart` as a second write tool)**
+4. ~~Chat endpoint (`POST /api/v1/assistant/chat`) and the `apps/web` chat
+   widget.~~ **(done, as a plain request/response endpoint — not the
+   streaming one originally scoped here; revisit streaming if response
+   latency becomes a problem)**
 5. Phase 2 of the wider plan: seller/ops read-only tools on the same core
    (e.g. `get_low_stock_items`).
 
@@ -132,9 +138,11 @@ without signing in. See `services/api-gateway/docs/route-allowlist.md`.
 
 - **Pure orchestrator, not a new system of record.** Product, inventory,
   cart, and order data stay owned by their existing services.
-- **`add_to_cart` is the only write the agent can ever perform**, and it
-  works by relaying the buyer's own JWT (or guest `X-Cart-Token`) into
-  cart-service — no elevated or service-scoped access.
+- **`add_to_cart` and `remove_from_cart` are the only writes the agent can
+  ever perform**, and both work by relaying the buyer's own JWT (or guest
+  `X-Cart-Token`) into cart-service — no elevated or service-scoped access.
+  `loop.py` caps writes at one per turn regardless of which write tool(s)
+  Claude requests.
 - **No LangGraph, LangChain, or MCP for v1.** A hand-rolled Anthropic
   Messages API tool-use loop is enough for a single ~7-tool buyer flow, and
   raw pgvector SQL is enough for retrieval. Revisit LangGraph if a
@@ -145,14 +153,19 @@ without signing in. See `services/api-gateway/docs/route-allowlist.md`.
 ## Guardrails
 
 The chat endpoint has a scope-restricting system prompt, a per-caller rate
-limit, request size bounds, a PII trim on order data, a wall-clock timeout,
-and a write-tool-per-turn cap. See `docs/guardrails.md` for the full list
-and a few smaller open items surfaced since (frontend history pruning,
-non-idempotent-write-on-timeout).
+limit (keyed off `X-Forwarded-For` when behind the gateway), request size
+bounds, a PII trim on order data, a wall-clock timeout, a write-tool-per-turn
+cap, and a content-derived idempotency key on `add_to_cart` to make a
+same-item retry after a timeout a safe no-op. See `docs/guardrails.md` for
+the full list — nothing on that list is currently open.
 
 ## Observability
 
-Not started yet — see `docs/observability.md` for the plan. Biggest known
-gap: Anthropic token usage (`response.usage`) is never read or logged, so
-there's no visibility into per-conversation or aggregate spend despite
-rate limiting existing specifically to control it.
+Implemented: structured JSON log lines (`app/event_logger.py`) for every
+completed `/chat` request (`request_id`, tool calls, `stop_reason`, latency,
+Anthropic input/output token counts) and every downstream HTTP call, plus a
+Loki/Promtail/Grafana stack (`docker-compose.yml`, dev-only) with a
+dashboard (`infrastructure/monitoirng/dashboards/assistant-service-observability.json`)
+covering request rate, latency, token usage, stop reasons, downstream call
+latency/status by service, and rate-limit 429s. See `docs/observability.md`
+for what's covered and what's still a gap.

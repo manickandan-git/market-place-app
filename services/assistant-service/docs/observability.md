@@ -1,82 +1,70 @@
-# Observability — starting plan
+# Observability
 
 Scoped to assistant-service only (the chat/agent loop), not a platform-wide
-observability effort. Nothing below is implemented yet — this is a plan to
-pick up, not a changelog. Two things are true of the whole platform right
-now and worth remembering while planning: there is no logging, metrics, or
-tracing infrastructure anywhere in this repo (no Prometheus,
-OpenTelemetry, Sentry, log aggregation — checked), and only
-`auth-service`/`notification-service` use plain `logging` at all.
-assistant-service's own first (and only) use of `logging` is the exception
-handler added for guardrails finding #5
-(`app/agent/loop.py::run_single_tool`).
+observability effort. **The plan below has been implemented** — this doc now
+records what shipped and why, not a plan to pick up. Two things are still
+true of the rest of the platform: there is no shared logging/metrics/tracing
+convention repo-wide (no Prometheus, OpenTelemetry, Sentry — checked), and
+this Loki/Promtail/Grafana stack is wired up for assistant-service only.
 
-## The biggest blind spot: Anthropic token usage is invisible
+## What shipped
 
-Every `anthropic_client.messages.create(...)` call (`app/agent/loop.py`,
-two call sites) returns a `response.usage` field (input/output token
-counts) that the code never reads. After adding rate limiting specifically
-to control Anthropic spend (guardrails #3), there's still no actual
-visibility into what that spend *is* — no way to answer "how many tokens
-did this conversation cost" or "what's our daily Anthropic spend" today.
-This is the natural starting point.
-
-## What to instrument, in rough priority order
-
-1. **Token usage per Anthropic call.** Log `response.usage.input_tokens` /
-   `output_tokens` from both `messages.create()` call sites in `loop.py`,
-   tagged with `request_id`. Cheapest, highest-value — closes the blind
-   spot above directly.
-2. **Per-request outcome.** One log line per completed `/chat` request:
-   `request_id`, authenticated y/n, number of loop iterations used, which
-   tools were called and whether each succeeded, `stop_reason`, total
-   latency, total token counts. Nothing currently logs a normal
-   *successful* request at all — only the unexpected-exception path (#5)
-   logs anything today.
-3. **Tool-level detail.** Success/error rate per tool name, latency per
-   downstream HTTP call (`app/clients.py`), and how often `max_loops` gets
-   exhausted (the forced-final-turn path in `loop.py`) — that's a direct
-   signal the agent is struggling to resolve a request within budget.
-4. **Rate-limit visibility.** How often `ChatRateLimitMiddleware` actually
-   returns `429`, and to which key (token vs IP). This would let us
-   confirm whether guardrails finding E (the shared-bucket bug for
-   anonymous traffic behind the gateway) is a live problem in practice or
-   still theoretical — right now there's no way to tell.
-5. **`ServiceError` visibility.** Downstream failures (`app/clients.py`
-   raising `ServiceError`) are currently only surfaced as a `tool_result`
-   string back to Claude — never logged. Worth logging these too; they're
-   invisible today even though they're a distinct, already-handled failure
-   path from the unexpected-exception one #5 covers.
+- **Structured JSON log lines**, one call per event via
+  `app/event_logger.py`'s `log_event(logger, event, **fields)` — plain
+  stdlib `logging`, no new dependency, emitted through each call site's own
+  logger so the module name stays accurate. Three event types:
+  - `chat_request` (`app/routes/chat.py`) — one line per completed or timed-out
+    `/chat` call: `request_id`, `authenticated`, `outcome`
+    (`completed`/`timeout`), `loop_iterations`, `forced_final_turn`,
+    `tool_calls`, `stop_reason`, `latency_ms`, `input_tokens`,
+    `output_tokens`. Closes the original "no visibility into Anthropic
+    spend" blind spot directly — `response.usage` is read at both
+    `messages.create()` call sites in `app/agent/loop.py` and threaded back
+    through `AgentStats`.
+  - `downstream_call` (`app/clients.py`'s `_log_downstream()`, called from
+    every product/inventory/order/cart client method, success or failure) —
+    `service`, `operation`, `status_code` (`None` on a connection-level
+    `httpx.RequestError`), `duration_ms`, `request_id`. Covers both
+    tool-level latency/error-rate and `ServiceError` visibility — a failed
+    downstream call is logged here even though it only reaches Claude as a
+    `tool_result` string.
+  - `chat_rate_limited` (`app/middleware/rate_limit.py`) — logged on every
+    `429`, with `key_type` (`token` or `ip` — never the raw key itself, which
+    could be a bearer token) and `retry_after`, so guardrails finding E
+    (anonymous-caller bucket sharing) is now something you can confirm from
+    logs instead of reasoning about in the abstract.
+- **Loki + Promtail + Grafana** (`docker-compose.yml`, dev-only, profile
+  section "23. Observability stack"): Promtail tails every container's
+  stdout/stderr via Docker service discovery, ships to Loki, Grafana
+  queries it. Config lives in `infrastructure/monitoirng/` (`loki-config.yaml`,
+  `promtail-config.yaml`, `grafana-datasources.yaml`,
+  `grafana-dashboards.yaml`, `dashboards/`).
+- **Dashboard**: `infrastructure/monitoirng/dashboards/assistant-service-observability.json`
+  ("Assistant Service - Observability"), auto-provisioned. Panels: chat
+  requests/min, chat request latency (avg ms), chat requests by
+  `stop_reason`, Anthropic token usage/min, downstream call latency by
+  service (avg ms), downstream calls by status code, chat rate-limit
+  hits (429s)/min, and a raw event-log panel over all three event types.
 
 ## What to deliberately not log
 
 Given the guardrails #7 PII work (`app/tools/_order_utils.py`'s
 `summarize_order()`), the same discipline applies to logs: log metadata
 (tool names, counts, latencies, outcomes, token counts), never raw message
-content or full tool-result payloads. A log line that includes the actual
-conversation text or an order's `shipping_address` defeats the point of
-having trimmed it out of the Anthropic-facing payload in the first place.
+content or full tool-result payloads. None of the three event types above
+carry conversation text or a raw order payload — this was verified while
+implementing, not just intended.
 
-## Recommended starting point
+## Known gaps
 
-Structured `logging` output (stdlib, same minimal pattern #5 already
-introduced — no new dependency), one log line per completed `/chat`
-request carrying the fields from item 2 above, plus item 1's token counts
-folded in.
-
-**Tradeoff to go in eyes-open:** this gets per-request debugging (grep logs
-by `request_id`) cheaply, but not trends, dashboards, or alerting. Real
-cost/latency trend visibility eventually needs somewhere to ship logs to
-and query them — the platform has no log aggregation or metrics
-infrastructure anywhere today, so that's a bigger, platform-level decision
-that shouldn't be folded into this service alone. Start with stdlib
-logging here; revisit shipping logs somewhere once (or if) the platform
-adopts a convention for it.
-
-## Open question for next session
-
-Log format: plain stdlib text logs (matches #5, zero new dependencies) vs.
-structured JSON logs (easier to grep/parse `request_id` and fields out of,
-slightly more setup — a formatter, not a new dependency either). Worth
-deciding before writing the first log line, since changing format later
-means touching every call site again.
+- **No alerting.** Grafana visualizes the metrics above but nothing pages
+  or notifies on them (e.g. a spike in 429s or `stop_reason: max_tokens`
+  going unusually high). Dashboards only help if someone is looking.
+- **No cost/spend rollup.** Token counts are logged and graphed per-minute,
+  but there's no daily/monthly aggregate spend view — would need either a
+  Grafana panel with a longer window and a $/token conversion, or a
+  separate scheduled job.
+- **Dev-only stack.** The Loki/Promtail/Grafana containers are part of the
+  default `docker-compose.yml`, not gated behind a `--profile`, but nothing
+  about the setup (retention, auth, resource limits) has been evaluated for
+  a non-local environment.

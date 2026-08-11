@@ -17,6 +17,15 @@ PostgreSQL database and is independently deployable; the root
 | [order-service](services/order-service) | `8007` | Checkout order snapshots and order lifecycle | [README](services/order-service/README.md) |
 | [payment-service](services/payment-service) | `8008` | Stripe payment authorization, capture, and refunds | [README](services/payment-service/README.md) |
 | [shipping-service](services/shipping-service) | `8009` | Shipment records, carrier/tracking info, drives Order's fulfillment callback | [README](services/shipping-service/README.md) |
+| [api-gateway](services/api-gateway) | `9000` | Reverse proxy fronting every public route: allowlisting, CORS, correlation IDs, timeouts, circuit breaker, fail-fast JWT check. No database, no business logic. | [README](services/api-gateway/README.md) |
+| [assistant-service](services/assistant-service) | `8012` | Buyer-facing agentic AI chat (Claude tool-use): catalog search, availability, policy Q&A, a buyer's own orders, add/remove-cart writes. Owns no data itself. | [README](services/assistant-service/README.md) |
+
+`services/audit-service/` and `services/search-service/` also exist but are
+empty directories — no code, not yet built.
+
+[`apps/web`](apps/web) is the Next.js buyer storefront. It's not a backend
+service and owns no database; it talks to the gateway only from server-side
+code (route handlers / Server Components), never directly from the browser.
 
 `auth-service` (a.k.a. the Identity Service) is the sole authority for
 credentials, roles, sessions, and JWT issuance. The other services validate
@@ -25,8 +34,12 @@ Identity-issued JWTs via JWKS and treat the token's immutable `sub` claim as
 
 ## Architecture
 
-Every service below validates JWTs issued by auth-service via JWKS —
-that fan-out is omitted from the diagram to keep it readable:
+`api-gateway` (`:9000`) fronts every public route into the services below
+and `assistant-service` (`:8012`) calls into product/inventory/order/cart
+as a read-mostly client of them — both are omitted from the diagrams below
+to keep the request/data-ownership flow readable. Every service below also
+validates JWTs issued by auth-service via JWKS — that fan-out is likewise
+omitted:
 
 ```text
   auth-service :8001  (Identity, JWKS — issues every JWT below)
@@ -88,8 +101,10 @@ docker compose up --build
 
 This starts, in dependency order: each service's Postgres database, Redis
 (auth and notification), the notification Celery worker and mailer
-(`mailpit`, profile `dev`), and all nine API services. Each API container
-applies its own Alembic migrations on startup.
+(`mailpit`, profile `dev`), all ten database-backed API services, the
+api-gateway (no database), the observability stack (Loki/Promtail/Grafana,
+dev-only), and the `apps/web` storefront. Each API container applies its
+own Alembic migrations on startup.
 
 - auth-service: http://localhost:8001/docs
 - notification-service: http://localhost:8002/docs
@@ -100,6 +115,11 @@ applies its own Alembic migrations on startup.
 - order-service: http://localhost:8007/docs
 - payment-service: http://localhost:8008/docs
 - shipping-service: http://localhost:8009/docs
+- api-gateway: http://localhost:9000 (proxies the routes above under `/api/v1/*`)
+- assistant-service: http://localhost:8012/docs
+- apps/web storefront: http://localhost:3001 (Docker) — run `npm run dev` in
+  `apps/web` separately for local dev on http://localhost:3000; both can be
+  up at once
 - mailpit (dev email capture, `--profile dev`): http://localhost:8025
 
 Start a subset (e.g. just Identity + User):
@@ -138,12 +158,15 @@ the host, use the published ports:
 | order (`marketplace-order-db`) | `5439` |
 | payment (`marketplace-payment-db`) | `5440` |
 | shipping (`marketplace-shipping-db`) | `5441` |
+| assistant (`marketplace-assistant-db`) | `5442` |
 
 ## Repository layout
 
 ```text
 market-place-app/
 ├── docker-compose.yml       # Full local stack: all services, databases, Redis, worker
+├── apps/
+│   └── web/                 # Next.js buyer storefront, talks to api-gateway
 ├── services/
 │   ├── auth-service/        # Identity: registration, login, tokens, JWKS
 │   ├── notification-service/# Email delivery, Celery worker
@@ -153,7 +176,11 @@ market-place-app/
 │   ├── cart-service/        # Shopping intent, price snapshots
 │   ├── order-service/       # Checkout, order lifecycle, checkout hub
 │   ├── payment-service/     # Stripe authorization, capture, refunds
-│   └── shipping-service/    # Shipment records, carrier/tracking
+│   ├── shipping-service/    # Shipment records, carrier/tracking
+│   ├── api-gateway/         # Reverse proxy: allowlisting, CORS, circuit breaker
+│   ├── assistant-service/   # Agentic AI chat over the other services
+│   ├── audit-service/       # Empty directory, not yet built
+│   └── search-service/      # Empty directory, not yet built
 ├── tests/
 │   └── integration-tests/   # Real-HTTP boundary tests across running services
 └── README.md
