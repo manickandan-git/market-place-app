@@ -267,7 +267,7 @@ class InventoryService:
             data.model_dump_json().encode("utf-8")
         ).hexdigest()
         existing = await self._idempotency_lookup(
-            principal,
+            principal.subject,
             idempotency_key,
             request_hash,
         )
@@ -390,7 +390,7 @@ class InventoryService:
             f"{item_id}:{data.model_dump_json()}:{expected_version}".encode()
         ).hexdigest()
         existing = await self._idempotency_lookup(
-            principal,
+            principal.subject,
             idempotency_key,
             request_hash,
         )
@@ -457,7 +457,7 @@ class InventoryService:
             data.model_dump_json().encode("utf-8")
         ).hexdigest()
         existing = await self._idempotency_lookup(
-            principal,
+            principal.subject,
             idempotency_key,
             request_hash,
         )
@@ -571,7 +571,7 @@ class InventoryService:
             data.model_dump_json().encode("utf-8")
         ).hexdigest()
         existing = await self._idempotency_lookup(
-            principal,
+            data.customer_id,
             idempotency_key,
             request_hash,
         )
@@ -642,7 +642,7 @@ class InventoryService:
                 item.version += 1
                 reservation = InventoryReservation(
                     inventory_item_id=item.id,
-                    customer_id=principal.subject,
+                    customer_id=data.customer_id,
                     cart_reference=data.cart_reference,
                     order_reference=data.order_reference,
                     quantity=take,
@@ -695,7 +695,7 @@ class InventoryService:
         if idempotency_key:
             self.session.add(
                 IdempotencyRecord(
-                    actor_id=principal.subject,
+                    actor_id=data.customer_id,
                     idempotency_key=idempotency_key,
                     request_hash=request_hash,
                     resource_type="reservation_group",
@@ -1122,7 +1122,7 @@ class InventoryService:
 
     async def _idempotency_lookup(
         self,
-        principal: Principal,
+        actor_id: UUID,
         idempotency_key: str | None,
         request_hash: str,
     ) -> IdempotencyRecord | None:
@@ -1130,7 +1130,7 @@ class InventoryService:
             return None
         existing = await self.session.scalar(
             select(IdempotencyRecord).where(
-                IdempotencyRecord.actor_id == principal.subject,
+                IdempotencyRecord.actor_id == actor_id,
                 IdempotencyRecord.idempotency_key == idempotency_key,
             )
         )

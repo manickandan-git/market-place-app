@@ -47,8 +47,9 @@ async def make_item(
     return item
 
 
-def batch(seller_id, sku, quantity, **kwargs) -> BatchReservationCreate:
+def batch(seller_id, sku, quantity, *, customer_id, **kwargs) -> BatchReservationCreate:
     return BatchReservationCreate(
+        customer_id=customer_id,
         lines=[BatchReservationLine(sku=sku, seller_id=seller_id, quantity=quantity)],
         **kwargs,
     )
@@ -66,7 +67,7 @@ async def test_batch_reservation_reserves_and_shares_group_id(session) -> None:
     buyer = principal(roles=["buyer"])
 
     group_id, reservations = await service.create_batch_reservation(
-        batch(seller, "SKU-1", 5), buyer, None, None
+        batch(seller, "SKU-1", 5, customer_id=buyer.subject), buyer, None, None
     )
 
     assert len(reservations) == 1
@@ -79,6 +80,26 @@ async def test_batch_reservation_reserves_and_shares_group_id(session) -> None:
     assert item.available_quantity == 15
 
 
+async def test_batch_reservation_uses_customer_id_from_body_not_caller(session) -> None:
+    """Regression test: the caller is now always a scoped service (or
+    admin), never the buyer directly, so the reservation's owner must come
+    from data.customer_id -- not principal.subject, which is the calling
+    service's own fixed identity."""
+    service = InventoryService(session)
+    seller = uuid4()
+    await make_item(session, seller_id=seller, sku="SKU-1B", on_hand=20)
+    buyer_id = uuid4()
+    order_service = principal(roles=["service"], scopes=["inventory:checkout"])
+    assert order_service.subject != buyer_id
+
+    _, reservations = await service.create_batch_reservation(
+        batch(seller, "SKU-1B", 5, customer_id=buyer_id), order_service, None, None
+    )
+
+    assert reservations[0].customer_id == buyer_id
+    assert reservations[0].customer_id != order_service.subject
+
+
 async def test_batch_reservation_splits_across_warehouses(session) -> None:
     service = InventoryService(session)
     seller = uuid4()
@@ -87,7 +108,7 @@ async def test_batch_reservation_splits_across_warehouses(session) -> None:
     buyer = principal(roles=["buyer"])
 
     group_id, reservations = await service.create_batch_reservation(
-        batch(seller, "SKU-2", 6), buyer, None, None
+        batch(seller, "SKU-2", 6, customer_id=buyer.subject), buyer, None, None
     )
 
     assert len(reservations) == 2
@@ -108,7 +129,7 @@ async def test_batch_reservation_rejects_insufficient_stock(session) -> None:
 
     with pytest.raises(ServiceError) as error:
         await service.create_batch_reservation(
-            batch(seller, "SKU-3", 5), buyer, None, None
+            batch(seller, "SKU-3", 5, customer_id=buyer.subject), buyer, None, None
         )
     assert error.value.code == "insufficient_stock"
 
@@ -132,7 +153,7 @@ async def test_batch_reservation_rejects_unknown_sku(session) -> None:
 
     with pytest.raises(ServiceError) as error:
         await service.create_batch_reservation(
-            batch(seller, "NO-SUCH-SKU", 1), buyer, None, None
+            batch(seller, "NO-SUCH-SKU", 1, customer_id=buyer.subject), buyer, None, None
         )
     assert error.value.code == "invalid_sku"
 
@@ -146,7 +167,7 @@ async def test_batch_reservation_ignores_another_sellers_stock(session) -> None:
 
     with pytest.raises(ServiceError) as error:
         await service.create_batch_reservation(
-            batch(seller, "SKU-4", 1), buyer, None, None
+            batch(seller, "SKU-4", 1, customer_id=buyer.subject), buyer, None, None
         )
     assert error.value.code == "invalid_sku"
 
@@ -156,7 +177,7 @@ async def test_batch_reservation_is_idempotent(session) -> None:
     seller = uuid4()
     item = await make_item(session, seller_id=seller, sku="SKU-5", on_hand=20)
     buyer = principal(roles=["buyer"])
-    data = batch(seller, "SKU-5", 5)
+    data = batch(seller, "SKU-5", 5, customer_id=buyer.subject)
 
     group_id, reservations = await service.create_batch_reservation(
         data, buyer, None, "batch-key-1"
@@ -169,6 +190,36 @@ async def test_batch_reservation_is_idempotent(session) -> None:
     assert [r.id for r in replay_reservations] == [r.id for r in reservations]
     await session.refresh(item)
     assert item.reserved_quantity == 5
+
+
+async def test_batch_reservation_idempotency_is_scoped_per_customer(session) -> None:
+    """Regression test: idempotency used to be keyed by principal.subject,
+    which was safely per-buyer when the buyer's own JWT was forwarded. Now
+    every checkout call shares one calling-service principal, so the
+    idempotency actor must be data.customer_id instead -- otherwise two
+    different buyers reusing the same client-supplied Idempotency-Key
+    would collide."""
+    service = InventoryService(session)
+    seller = uuid4()
+    await make_item(session, seller_id=seller, sku="SKU-5B", on_hand=20)
+    order_service = principal(roles=["service"], scopes=["inventory:checkout"])
+    buyer_a = uuid4()
+    buyer_b = uuid4()
+
+    group_a, _ = await service.create_batch_reservation(
+        batch(seller, "SKU-5B", 1, customer_id=buyer_a),
+        order_service,
+        None,
+        "shared-key",
+    )
+    group_b, _ = await service.create_batch_reservation(
+        batch(seller, "SKU-5B", 1, customer_id=buyer_b),
+        order_service,
+        None,
+        "shared-key",
+    )
+
+    assert group_a != group_b
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +235,7 @@ async def test_commit_reservation_group_persists_committed_status(session) -> No
     item = await make_item(session, seller_id=seller, sku="SKU-6", on_hand=20)
     buyer = principal(roles=["buyer"])
     group_id, _ = await service.create_batch_reservation(
-        batch(seller, "SKU-6", 5), buyer, None, None
+        batch(seller, "SKU-6", 5, customer_id=buyer.subject), buyer, None, None
     )
 
     reservations = await service.commit_reservation_group(group_id, buyer, None)
@@ -210,7 +261,7 @@ async def test_commit_reservation_group_is_idempotent(session) -> None:
     item = await make_item(session, seller_id=seller, sku="SKU-7", on_hand=20)
     buyer = principal(roles=["buyer"])
     group_id, _ = await service.create_batch_reservation(
-        batch(seller, "SKU-7", 5), buyer, None, None
+        batch(seller, "SKU-7", 5, customer_id=buyer.subject), buyer, None, None
     )
 
     await service.commit_reservation_group(group_id, buyer, None)
@@ -228,7 +279,7 @@ async def test_commit_reservation_group_rejects_mixed_status(session) -> None:
     await make_item(session, seller_id=seller, sku="SKU-8", on_hand=20)
     buyer = principal(roles=["buyer"])
     group_id, reservations = await service.create_batch_reservation(
-        batch(seller, "SKU-8", 5), buyer, None, None
+        batch(seller, "SKU-8", 5, customer_id=buyer.subject), buyer, None, None
     )
 
     reservations[0].status = ReservationStatus.RELEASED
@@ -254,7 +305,7 @@ async def test_commit_reservation_group_rejects_other_customer(session) -> None:
     await make_item(session, seller_id=seller, sku="SKU-9", on_hand=20)
     buyer = principal(roles=["buyer"])
     group_id, _ = await service.create_batch_reservation(
-        batch(seller, "SKU-9", 5), buyer, None, None
+        batch(seller, "SKU-9", 5, customer_id=buyer.subject), buyer, None, None
     )
 
     stranger = principal(roles=["buyer"])
@@ -274,7 +325,7 @@ async def test_release_reservation_group_restores_availability(session) -> None:
     item = await make_item(session, seller_id=seller, sku="SKU-10", on_hand=20)
     buyer = principal(roles=["buyer"])
     group_id, _ = await service.create_batch_reservation(
-        batch(seller, "SKU-10", 5), buyer, None, None
+        batch(seller, "SKU-10", 5, customer_id=buyer.subject), buyer, None, None
     )
 
     reservations = await service.release_reservation_group(
@@ -294,7 +345,7 @@ async def test_release_reservation_group_is_idempotent(session) -> None:
     item = await make_item(session, seller_id=seller, sku="SKU-11", on_hand=20)
     buyer = principal(roles=["buyer"])
     group_id, _ = await service.create_batch_reservation(
-        batch(seller, "SKU-11", 5), buyer, None, None
+        batch(seller, "SKU-11", 5, customer_id=buyer.subject), buyer, None, None
     )
 
     await service.release_reservation_group(
@@ -315,7 +366,7 @@ async def test_release_reservation_group_rejects_committed_group(session) -> Non
     await make_item(session, seller_id=seller, sku="SKU-12", on_hand=20)
     buyer = principal(roles=["buyer"])
     group_id, _ = await service.create_batch_reservation(
-        batch(seller, "SKU-12", 5), buyer, None, None
+        batch(seller, "SKU-12", 5, customer_id=buyer.subject), buyer, None, None
     )
     await service.commit_reservation_group(group_id, buyer, None)
 

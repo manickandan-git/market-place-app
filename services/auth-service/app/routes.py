@@ -717,7 +717,7 @@ async def issue_service_token(
         settings.order_service_client_id: (
             settings.order_service_client_secret,
             settings.order_service_subject,
-            "inventory:commit cart:checkout",
+            "inventory:commit cart:checkout inventory:checkout",
         ),
         settings.shipping_service_client_id: (
             settings.shipping_service_client_secret,

@@ -197,6 +197,15 @@ class BatchReservationLine(APIModel):
 
 
 class BatchReservationCreate(APIModel):
+    # Only a scope-gated caller (inventory:checkout) or admin can reach
+    # this endpoint -- never the buyer's own JWT -- so principal.subject is
+    # always the calling service's fixed identity, not the buyer. The
+    # buyer this reservation is actually for has to travel in the body
+    # instead, same pattern as cart-service's MarkCheckedOutRequest.
+    # Unlike that case, Inventory has no pre-existing row to verify this
+    # against on a create, so it's taken on faith -- inventory:checkout
+    # scope is the entire trust boundary here.
+    customer_id: UUID
     cart_reference: str | None = Field(default=None, max_length=120)
     order_reference: str | None = Field(default=None, max_length=120)
     expires_at: AwareDatetime | None = None

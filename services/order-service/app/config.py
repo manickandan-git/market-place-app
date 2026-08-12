@@ -28,8 +28,11 @@ class Settings(BaseSettings):
     notification_internal_api_key: str = "change-me"
     # Client credentials this service uses to authenticate itself to
     # auth-service's POST /api/v1/auth/service-token, to obtain a token
-    # carrying inventory:commit + cart:checkout. inventory:commit is
-    # needed for payment_authorized/payment_failed: those are called by
+    # carrying inventory:checkout + inventory:commit + cart:checkout.
+    # inventory:checkout is needed to create a checkout reservation in the
+    # first place — Inventory's create-batch-reservation endpoint only
+    # accepts that scope (or admin), not a forwarded buyer JWT. inventory:commit
+    # is needed for payment_authorized/payment_failed: those are called by
     # Payment Service's own orders:payment-scoped token, which must not be
     # forwarded straight through to Inventory's commit/release endpoints
     # (Inventory doesn't grant that scope any authority there — only the

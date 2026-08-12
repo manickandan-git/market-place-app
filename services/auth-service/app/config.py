@@ -62,8 +62,13 @@ class Settings(BaseSettings):
     # Registered clients: Inventory Sync (inventory:sync, to call
     # Inventory's internal catalog projection endpoint), Payment Service
     # (orders:payment, to call Order's payment-authorized / payment-failed
-    # callbacks), and Order Service (inventory:commit + cart:checkout, a
-    # space-separated multi-scope grant on one client). inventory:commit
+    # callbacks), and Order Service (inventory:checkout + inventory:commit +
+    # cart:checkout, a space-separated multi-scope grant on one client).
+    # inventory:checkout lets Order create a checkout reservation batch in
+    # the first place — Inventory's create-batch-reservation endpoint only
+    # accepts that scope (or admin); a buyer's own JWT is never sufficient,
+    # so a buyer can't call Inventory's internal endpoint directly and
+    # bypass Cart/Order's own checkout business rules. inventory:commit
     # lets Order commit/release Inventory reservations on behalf of a
     # caller that isn't the buyer — e.g. Payment Service's webhook handler
     # calling Order's payment-authorized/payment-failed, which must not

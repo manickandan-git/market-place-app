@@ -10,11 +10,12 @@ from app.exceptions import ServiceError
 
 class AuthClient:
     """Fetches and caches a service-token (client-credentials) bearer
-    token carrying inventory:commit + cart:checkout, for calls
-    order-service makes with its own authority: Inventory's commit/release
-    endpoints when the caller isn't the buyer (e.g. Payment Service's
-    webhook calling payment_authorized/payment_failed), and Cart's
-    checked-out callback after placing an order."""
+    token carrying inventory:checkout + inventory:commit + cart:checkout,
+    for calls order-service makes with its own authority: Inventory's
+    checkout reservation-create call during checkout itself, Inventory's
+    commit/release endpoints when the caller isn't the buyer (e.g. Payment
+    Service's webhook calling payment_authorized/payment_failed), and
+    Cart's checked-out callback after placing an order."""
 
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None):
         self.settings = settings

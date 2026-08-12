@@ -103,6 +103,7 @@ class OrderService:
         )
         reservation = await self.inventory.reserve_batch(
             BatchReservationRequest(
+                customer_id=principal.subject,
                 cart_reference=str(cart.id),
                 order_reference=order_number,
                 expires_at=expires_at,
@@ -115,7 +116,7 @@ class OrderService:
                     for item in cart.items
                 ],
             ),
-            access_token,
+            await self._service_token(access_token),
             idempotency_key,
             request_id,
         )
@@ -421,16 +422,18 @@ class OrderService:
     async def _service_token(self, fallback: str) -> str:
         """Token used for internal calls order-service makes with its own
         authority rather than forwarding the caller's token: Inventory's
-        commit/release endpoints (needs inventory:commit) and Cart's
-        checked-out callback (needs cart:checkout). The caller's own
-        bearer token (`fallback`) never carries either scope — forwarding
-        it is only correct for calls the buyer is *directly* authorized to
-        make (e.g. reserving/releasing their own cart's inventory during
-        checkout itself). It's wrong for payment_authorized/payment_failed,
-        called by Payment Service's orders:payment-scoped token, which
-        grants nothing on Inventory. `auth_client` is optional so tests can
-        keep constructing `OrderService` without it and passing whatever
-        token they need forwarded.
+        checkout reservation-create/commit/release endpoints (needs
+        inventory:checkout / inventory:commit respectively) and Cart's
+        checked-out callback (needs cart:checkout). The caller's own bearer
+        token (`fallback`) never carries any of these scopes — reservation
+        *release* triggered directly from the buyer's own request (e.g.
+        cancelling their own order) still works when forwarded, since
+        Inventory's release endpoint also accepts the reservation's owning
+        customer, but creating and committing a reservation, and retiring
+        the cart, all require order-service's own service-token authority.
+        `auth_client` is optional so tests can keep constructing
+        `OrderService` without it and passing whatever token they need
+        forwarded.
         """
         if self.auth_client is None:
             return fallback

@@ -84,34 +84,78 @@ commit that specific reservation — an abandoned cart's hold otherwise sits
 locked indefinitely. See `CLAUDE.md`'s "Known gaps" section for the fix
 this needs (register `inventory:expire`, add a periodic caller).
 
-### 2. No `inventory:checkout` scope — the checkout endpoints aren't actually Order-Service-only
+### 2. `inventory:checkout` scope — RESOLVED (2026-08-12)
 
-This doc's own "Reserve" rules above say to "authenticate the buyer or an
-Order service token delegated for that buyer," implying some scoped
-restriction. That was never implemented. All three checkout routes —
-`/internal/checkout/reservations/batch`, `/{group_id}/commit`,
-`/{group_id}/release` — are gated only by
-`AuthenticatedPrincipal = Depends(get_current_principal)` in
-`app/routes/inventory.py`: **any** valid JWT passes (buyer, seller, admin,
-or any service token), with no `require_scope` check at all. Compare to
+This doc's own "Reserve" rules above used to say to "authenticate the
+buyer or an Order service token delegated for that buyer," implying some
+scoped restriction that was never actually implemented: all three
+checkout routes were gated only by
+`AuthenticatedPrincipal = Depends(get_current_principal)` — **any** valid
+JWT passed (buyer, seller, admin, or any service token), unlike
 `sync_catalog_sku` (`inventory:sync`) and `expire_reservations`
-(`inventory:expire`), which are properly scope-gated.
-
-Practical consequence: any buyer's ordinary JWT can call
+(`inventory:expire`), which were properly scope-gated. Practical
+consequence: any buyer's ordinary JWT could call
 `POST /internal/checkout/reservations/batch` directly, bypassing
-Cart/Order's own business rules (price snapshot, cart-readiness checks),
-and tie up real stock in a reservation group that never becomes an order —
-a stock-locking vector with no authorization boundary today. Commit/release
-at least have an inline ownership check (`_locked_group`/
-`_active_reservation_with_item`: admin, seller role, the reservation's own
-customer, or `inventory:commit` scope), but reservation creation has none.
+Cart/Order's own business rules, and tie up real stock in a reservation
+group that never becomes an order.
 
-Fix: define an `inventory:checkout` scope, register it for order-service's
-client in auth-service (alongside its existing `inventory:commit
-cart:checkout`), and gate `create_reservation_batch` with
-`require_scope("inventory:checkout")` — buyers would then only ever reserve
-stock indirectly, through Order Service's `POST /api/v1/orders`, never by
-calling Inventory's internal endpoint directly.
+Fixed by defining an `inventory:checkout` scope, registering it for
+order-service's client in auth-service (alongside its existing
+`inventory:commit cart:checkout`), and gating `create_reservation_batch`
+with `require_scope("inventory:checkout")` (`app/routes/inventory.py`) —
+buyers now only ever reserve stock indirectly, through Order Service's
+`POST /api/v1/orders`. Commit/release were left as `AuthenticatedPrincipal`
+with their existing inline ownership check (`_locked_group`/
+`_active_reservation_with_item`: admin, seller role, the reservation's own
+customer, or `inventory:commit` scope) — that was already adequate, per
+this doc's original assessment.
+
+**The fix as first written above was incomplete** — it didn't anticipate
+that switching order-service from forwarding the buyer's JWT to using its
+own service token relocates the buyer's identity out of `principal.subject`
+for this call. Two things depended on that identity and both broke,
+caught by live verification rather than by the unit tests (which construct
+`Principal`/request objects directly and don't exercise this seam):
+
+- **Reservation ownership.** `create_batch_reservation` used to set
+  `InventoryReservation.customer_id = principal.subject`. With
+  order-service's fixed service subject as the caller, every reservation
+  would have been "owned" by order-service itself, not the buyer —
+  breaking `_locked_group`'s ownership check the moment the buyer tried to
+  release/cancel their own still-pending order (a live `403` on
+  `POST /internal/checkout/reservations/{group_id}/release` surfaced this
+  immediately). Fixed by adding `customer_id: UUID` to
+  `BatchReservationCreate` (required — only scoped callers reach this
+  route now, and they always know the buyer) and using `data.customer_id`
+  for the reservation rows instead of `principal.subject`. Inventory has
+  no pre-existing row to verify this against on a *create* (unlike
+  cart-service's `MarkCheckedOutRequest.customer_id`, checked against the
+  cart's own owner column) — `inventory:checkout` scope is the entire
+  trust boundary for this field, taken on faith.
+- **Idempotency scoping.** `IdempotencyRecord.actor_id` was also keyed on
+  `principal.subject`, which was safely per-buyer when the buyer's JWT was
+  forwarded. With one shared service identity making every checkout call,
+  the idempotency namespace collapsed to a single global key space keyed
+  on a buyer-controlled `Idempotency-Key` header (8–200 chars, straight
+  from `POST /api/v1/orders`) — two different buyers reusing the same
+  key value could have collided, either as a spurious `409` blocking a
+  legitimate checkout, or, if the request hash happened to match, one
+  buyer receiving another buyer's reservation group. Fixed by scoping
+  `_idempotency_lookup` (and the `IdempotencyRecord` it writes) to
+  `data.customer_id` for this call site specifically, leaving the other
+  three callers (seller/admin-authored: `create_inventory_item`,
+  `adjust_stock`, single-reservation `create_reservation`) on
+  `principal.subject` as before.
+
+order-service's side: `BatchReservationRequest` gained the same
+`customer_id: UUID` field, populated from `principal.subject` (the
+authenticated buyer making the checkout request, already asserted equal
+to `cart.customer_id` earlier in `OrderService.create()`) — not
+`cart.customer_id` itself, since `principal.subject` is the verified fact
+and `cart.customer_id` is a downstream-reported value. `OrderService.create()`
+now calls `self.inventory.reserve_batch(..., await self._service_token(access_token), ...)`
+instead of forwarding `access_token` directly, matching how commit/release
+already obtained order-service's own authority.
 
 ### 3. Outbox events carry no correlation ID
 

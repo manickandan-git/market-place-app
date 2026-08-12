@@ -60,3 +60,17 @@ async def test_admin_satisfies_service_scope() -> None:
     )
     dependency = require_scope("inventory:expire")
     assert await dependency(principal) == principal
+
+
+@pytest.mark.asyncio
+async def test_scope_dependency_rejects_buyer_without_scope() -> None:
+    principal = Principal(
+        subject=uuid4(),
+        roles=frozenset({"buyer"}),
+        scopes=frozenset(),
+        claims={},
+    )
+    dependency = require_scope("inventory:checkout")
+    with pytest.raises(HTTPException) as error:
+        await dependency(principal)
+    assert error.value.status_code == 403

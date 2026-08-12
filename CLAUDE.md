@@ -297,24 +297,36 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   client (mirroring how `inventory:sync`/`orders:payment`/
   `inventory:commit cart:checkout` were added), and add a periodic caller
   (cron container, Celery beat, or similar) that hits the sweep endpoint.
-- **Inventory's checkout endpoints have no `inventory:checkout` scope —
-  they aren't actually restricted to Order Service.** Verified against
-  the full security/reliability checklist in
-  `services/order-service/docs/inventory-checkout-contract.md`: atomic
-  batch reservations, row-lock oversell prevention, idempotent
-  reserve/commit/release, audit records, transactional outbox events,
-  and seller/active-SKU validation are all implemented as specified, but
-  `/internal/checkout/reservations/batch`, `/{group_id}/commit`, and
-  `/{group_id}/release` (`services/inventory-service/app/routes/inventory.py`)
-  are gated only by `Depends(get_current_principal)` — any valid JWT
-  (buyer, seller, admin, or any service token) can call them, unlike
-  `inventory:sync`/`inventory:expire` which are properly `require_scope`-gated.
-  Practical effect: a buyer's ordinary JWT can call the batch-reserve
-  endpoint directly, skipping Cart/Order's own business rules entirely,
-  and tie up real stock without ever creating an order. Fix: define
-  `inventory:checkout`, register it on order-service's client alongside
-  its existing `inventory:commit cart:checkout`, and gate
-  `create_reservation_batch` with `require_scope("inventory:checkout")`.
+- **Inventory's checkout reservation-create endpoint now requires an
+  `inventory:checkout` scope** (fixed 2026-08-12). It used to be gated
+  only by `Depends(get_current_principal)` — any valid JWT (buyer, seller,
+  admin, or any service token) could call
+  `POST /internal/checkout/reservations/batch` directly, skipping
+  Cart/Order's own business rules and tying up real stock without ever
+  creating an order. Fixed by defining `inventory:checkout`, registering
+  it on order-service's client alongside its existing `inventory:commit
+  cart:checkout`, and gating `create_reservation_batch` with
+  `require_scope("inventory:checkout")`
+  (`services/inventory-service/app/routes/inventory.py`).
+  `/{group_id}/commit` and `/{group_id}/release` were deliberately left
+  ungated beyond `AuthenticatedPrincipal` — they already have an adequate
+  inline ownership check (admin, seller role, the reservation's own
+  customer, or `inventory:commit` scope).
+  Switching order-service to use its own service token for this call
+  (instead of forwarding the buyer's JWT) surfaced a second-order bug the
+  fix itself introduced: `principal.subject` is now always order-service's
+  own fixed identity, not the buyer, so the reservation's `customer_id`
+  and the idempotency actor (both previously derived from
+  `principal.subject`) silently pointed at the wrong identity — the
+  former broke a buyer's own release/cancel of their pending order with a
+  live `403`, the latter would have let two different buyers' checkouts
+  collide on a shared, buyer-controlled `Idempotency-Key`. Fixed by adding
+  a required `customer_id: UUID` to `BatchReservationCreate`, threaded
+  from order-service's own `principal.subject` through
+  `BatchReservationRequest`, and used for both the reservation rows and
+  the idempotency lookup instead of the calling service's identity. Full
+  writeup, including why the originally-documented fix was incomplete, in
+  `services/order-service/docs/inventory-checkout-contract.md`.
 - **Inventory's `OutboxEvent` rows carry no correlation ID.** Unlike
   order-service's `OutboxEvent` (which has and populates a
   `correlation_id` column), inventory-service's model

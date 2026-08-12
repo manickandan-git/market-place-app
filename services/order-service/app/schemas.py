@@ -156,6 +156,7 @@ class BatchReservationLine(APIModel):
 
 
 class BatchReservationRequest(APIModel):
+    customer_id: UUID
     cart_reference: str
     order_reference: str
     expires_at: AwareDatetime

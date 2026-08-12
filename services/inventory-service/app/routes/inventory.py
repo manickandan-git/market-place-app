@@ -40,6 +40,7 @@ SellerPrincipal = Annotated[Principal, Depends(require_roles("seller", "admin"))
 AdminPrincipal = Annotated[Principal, Depends(require_roles("admin"))]
 ExpiryPrincipal = Annotated[Principal, Depends(require_scope("inventory:expire"))]
 SyncPrincipal = Annotated[Principal, Depends(require_scope("inventory:sync"))]
+CheckoutPrincipal = Annotated[Principal, Depends(require_scope("inventory:checkout"))]
 Service = Annotated[InventoryService, Depends(get_inventory_service)]
 Version = Annotated[int, Depends(required_version)]
 IdempotencyKey = Annotated[str | None, Depends(optional_idempotency_key)]
@@ -386,7 +387,7 @@ async def release_reservation(
 async def create_reservation_batch(
     data: BatchReservationCreate,
     request: Request,
-    principal: AuthenticatedPrincipal,
+    principal: CheckoutPrincipal,
     service: Service,
     idempotency_key: IdempotencyKey,
 ):
