@@ -41,24 +41,23 @@ Committed, released, and expired reservations are terminal.
 - Seller inventory management requires `seller` or `admin`.
 - Customer reservations use the Identity JWT subject as `customer_id`.
 - Product event projection requires the `inventory:sync` service scope.
-- Expiration workers require the `inventory:expire` service scope. **Gap:**
-  no client is currently registered for this scope in auth-service, and
-  nothing in this stack (no cron, no scheduler) actually calls
-  `POST /internal/reservations/expire` — the sweep exists but nothing
-  drives it, so expired reservations don't release stock on their own.
-  See `CLAUDE.md`'s "Known gaps" section and
+- Expiration workers require the `inventory:expire` service scope
+  (fixed 2026-08-12). An `inventory:expire` client is registered in
+  auth-service, and a Celery beat + worker pair
+  (`marketplace-inventory-beat`/`-worker` in the root
+  `docker-compose.yml`) calls `POST /internal/reservations/expire` on a
+  fixed interval, so expired reservations now release stock on their
+  own. See `CLAUDE.md`'s "Known gaps" section and
   `services/order-service/docs/inventory-checkout-contract.md`.
-- **Gap:** the checkout endpoints
-  (`/internal/checkout/reservations/batch`, `/{group_id}/commit`,
-  `/{group_id}/release`) have no dedicated scope at all — they only
-  require `Depends(get_current_principal)`, i.e. any valid JWT (buyer,
-  seller, admin, or any service token), unlike `inventory:sync` and
-  `inventory:expire` above. There is no `inventory:checkout` scope in
-  this codebase despite the intent implied in
-  `services/order-service/docs/inventory-checkout-contract.md`
-  ("authenticate the buyer or an Order service token delegated for that
-  buyer"). Any buyer's own JWT can call the batch-reserve endpoint
-  directly today, bypassing Cart/Order's business rules.
+- The checkout endpoints (`/internal/checkout/reservations/batch`,
+  `/{group_id}/commit`, `/{group_id}/release`) require an
+  `inventory:checkout` scope on the create call (fixed 2026-08-12;
+  `/{group_id}/commit` and `/{group_id}/release` are deliberately left
+  ungated beyond `AuthenticatedPrincipal`, since they already have an
+  adequate inline ownership check). Previously these had no dedicated
+  scope at all — any valid JWT (buyer, seller, admin, or any service
+  token) could call the batch-reserve endpoint directly, bypassing
+  Cart/Order's business rules. See `CLAUDE.md`'s "Known gaps" section.
 - Tokens are verified with Identity Service JWKS and checked for `kid`,
   algorithm, issuer, audience, subject, expiration, and `nbf`.
 

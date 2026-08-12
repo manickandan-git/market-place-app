@@ -64,25 +64,38 @@ records, transactional outbox events, protection against
 committing released/expired reservations, and seller/active-SKU
 validation — is implemented as specified.
 
-### 1. Expiry is not automatic
+### 1. Expiry is not automatic — RESOLVED (2026-08-12)
 
-Expired reservations do not automatically return stock to availability.
+Expired reservations did not automatically return stock to availability.
 `InventoryItem.available_quantity` is `on_hand_quantity - reserved_quantity`
-with no expiry check, so a reservation past its `expires_at` still counts
-against availability until something explicitly resolves it.
+with no expiry check, so a reservation past its `expires_at` kept counting
+against availability until something explicitly resolved it.
 
-Inventory does expose a sweep for this —
+Inventory already exposed a sweep for this —
 `InventoryService.expire_reservations()` behind
 `POST /internal/reservations/expire`, scoped `inventory:expire` per
-`services/inventory-service/docs/architecture.md` — but nothing calls it:
-no client is registered for that scope in auth-service, and no
-scheduler/cron invokes the endpoint anywhere in this stack. A reactive
-partial mitigation exists (`commit_reservation`/`commit_reservation_group`
-check expiry at commit time and resolve to `EXPIRED` instead of
-committing stale stock), but that only fires if someone later tries to
-commit that specific reservation — an abandoned cart's hold otherwise sits
-locked indefinitely. See `CLAUDE.md`'s "Known gaps" section for the fix
-this needs (register `inventory:expire`, add a periodic caller).
+`services/inventory-service/docs/architecture.md` — but nothing called it.
+Fixed by registering an `inventory:expire` client in auth-service (same
+pattern as `inventory:sync`/`orders:payment`/`inventory:commit
+cart:checkout`), and adding a Celery beat + worker pair to
+`services/inventory-service` (`marketplace-inventory-beat`/`-worker` in
+the root `docker-compose.yml`, with a dedicated `marketplace-inventory-redis`
+broker) that calls the sweep endpoint on a fixed interval using its own
+service token.
+
+Calling the sweep for the first time — nothing ever had before — surfaced
+a real, previously-latent bug: `expire_reservations()` processed its whole
+batch in one transaction with a single commit at the end, so one
+reservation whose item's `reserved_quantity` had already drifted out of
+sync (violating the DB's `reserved_quantity >= 0` check) crashed the
+entire sweep. Since the sweep queries expired reservations ordered by
+`expires_at`, that one poisoned row would sit first in every future run
+and permanently block expiry for every reservation behind it — the fix
+for the scheduling gap would have shipped a sweep that could wedge itself
+on its very first real bad row. Fixed by isolating each reservation's
+resolution in a savepoint (`self.session.begin_nested()`) so a bad row
+rolls back and is skipped (logged) instead of failing the whole batch —
+regression test in `services/inventory-service/tests/test_batch_reservation.py`.
 
 ### 2. `inventory:checkout` scope — RESOLVED (2026-08-12)
 

@@ -274,29 +274,32 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   workflow coverage** (`test_50_cart.py` through `test_80_shipping.py`),
   closing the gap this bullet used to describe. Writing it surfaced the
   `mark_checked_out` bug documented below.
-- **Expired reservations do not automatically return stock to
-  availability** — this is the one item of
+- **Expired reservations now automatically return stock to availability**
+  (fixed 2026-08-12) — closing the one item of
   `services/order-service/docs/inventory-checkout-contract.md`'s
-  completion checklist that isn't actually satisfied.
-  `InventoryItem.available_quantity` is a plain
-  `on_hand_quantity - reserved_quantity` computation with no expiry
-  awareness, so a reservation past its `expires_at` keeps counting
-  against availability until something explicitly resolves it. The sweep
-  exists (`InventoryService.expire_reservations()` behind
-  `POST /internal/reservations/expire` in `services/inventory-service`,
-  scoped `inventory:expire` per its own `docs/architecture.md`), but
-  nothing calls it: no client is registered for `inventory:expire` in
-  auth-service's service-token registry, and no
-  scheduler/cron/Celery-beat invokes the endpoint anywhere in
-  `docker-compose.yml` or the codebase. There's a *reactive* partial
-  mitigation — `commit_reservation`/`commit_reservation_group` check
-  `_is_expired()` at commit time and resolve to `EXPIRED` instead of
-  committing stale stock — but that only fires if someone later tries to
-  commit that specific reservation; an abandoned cart's hold otherwise
-  sits locked indefinitely. To close this: register an `inventory:expire`
-  client (mirroring how `inventory:sync`/`orders:payment`/
-  `inventory:commit cart:checkout` were added), and add a periodic caller
-  (cron container, Celery beat, or similar) that hits the sweep endpoint.
+  completion checklist that wasn't satisfied. An `inventory:expire`
+  client is registered in auth-service's service-token registry
+  (mirroring `inventory:sync`/`orders:payment`/`inventory:commit
+  cart:checkout`), and `docker-compose.yml` now runs a Celery beat +
+  worker pair for `services/inventory-service`
+  (`marketplace-inventory-beat`/`-worker`, with a dedicated
+  `marketplace-inventory-redis` broker) that calls
+  `POST /internal/reservations/expire` on a fixed interval
+  (`EXPIRE_SWEEPER_INTERVAL_SECONDS`, default 60s) using its own service
+  token, via a new `AuthClient` in `app/services/auth_client.py`
+  mirroring order-service's.
+  Exercising the sweep endpoint for the first time (nothing had ever
+  called it before) surfaced a real, previously-latent bug:
+  `InventoryService.expire_reservations()` processed its whole batch in
+  one transaction with a single commit at the end, so one reservation
+  whose item's `reserved_quantity` had already drifted out of sync
+  (violating the DB's `reserved_quantity >= 0` check) crashed the entire
+  sweep — and since `list_expired_active` orders by `expires_at`, that
+  poisoned row would sit first in every future run and permanently block
+  expiry for every reservation behind it. Fixed by isolating each
+  reservation's resolution in a savepoint (`self.session.begin_nested()`)
+  so a bad row rolls back and is skipped (logged) instead of failing the
+  whole batch — regression test in `tests/test_batch_reservation.py`.
 - **Inventory's checkout reservation-create endpoint now requires an
   `inventory:checkout` scope** (fixed 2026-08-12). It used to be gated
   only by `Depends(get_current_principal)` — any valid JWT (buyer, seller,
