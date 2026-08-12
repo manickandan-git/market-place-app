@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { FormMessage } from "@/components/FormMessage";
 import { addToCartFormAction } from "@/lib/actions/cart";
 import { initialCartActionState } from "@/lib/actions/cart-state";
+import { checkAvailability } from "@/lib/actions/inventory";
 import type { ProductDetail } from "@/lib/api/products";
 import { formatPrice } from "@/lib/format";
 import { buttonPrimary, input as inputClass, label as labelClass } from "@/lib/ui";
@@ -14,14 +15,43 @@ export function AddToCartForm({ product }: { product: ProductDetail }) {
   const [selectedVariantId, setSelectedVariantId] = useState(
     variants[0]?.id ?? "",
   );
+  const [quantity, setQuantity] = useState(1);
+  const [availableQuantity, setAvailableQuantity] = useState<number | null>(
+    null,
+  );
   const [state, action, pending] = useActionState(
     addToCartFormAction,
     initialCartActionState,
   );
 
+  const selectedSku = variants.find((v) => v.id === selectedVariantId)?.sku;
+
+  useEffect(() => {
+    if (!selectedSku) {
+      return;
+    }
+    let cancelled = false;
+    checkAvailability(selectedSku, quantity).then((result) => {
+      if (!cancelled) {
+        setAvailableQuantity(result?.available_quantity ?? null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSku, quantity]);
+
   if (variants.length === 0) {
     return null;
   }
+
+  // null means no variant is selected, or the availability check hasn't
+  // resolved yet (or failed) -- fail open rather than blocking "Add to
+  // cart" on a transient gateway hiccup, since checkout re-validates
+  // availability before placing the order regardless.
+  const effectiveAvailableQuantity = selectedSku ? availableQuantity : null;
+  const isOutOfStock =
+    effectiveAvailableQuantity !== null && effectiveAvailableQuantity < quantity;
 
   return (
     <form action={action} className="flex flex-col gap-4">
@@ -58,6 +88,18 @@ export function AddToCartForm({ product }: { product: ProductDetail }) {
         </>
       )}
 
+      {effectiveAvailableQuantity !== null ? (
+        <p
+          className={
+            isOutOfStock ? "text-sm text-danger" : "text-sm text-muted-foreground"
+          }
+        >
+          {effectiveAvailableQuantity > 0
+            ? `${effectiveAvailableQuantity} in stock`
+            : "Out of stock"}
+        </p>
+      ) : null}
+
       <div className="flex items-center gap-3">
         <label htmlFor="quantity" className={labelClass}>
           Qty
@@ -68,13 +110,18 @@ export function AddToCartForm({ product }: { product: ProductDetail }) {
           type="number"
           min={1}
           max={100}
-          defaultValue={1}
+          value={quantity}
+          onChange={(event) => setQuantity(Number(event.target.value) || 1)}
           className={inputClass + " w-20"}
         />
       </div>
 
-      <button type="submit" disabled={pending} className={buttonPrimary}>
-        {pending ? "Adding…" : "Add to cart"}
+      <button
+        type="submit"
+        disabled={pending || isOutOfStock}
+        className={buttonPrimary}
+      >
+        {pending ? "Adding…" : isOutOfStock ? "Out of stock" : "Add to cart"}
       </button>
     </form>
   );
