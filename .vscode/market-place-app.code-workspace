@@ -38,6 +38,9 @@
 		},
 		{
 			"path": "../services/assistant-service"
+		},
+		{
+			"path": "../apps/seller-portal"
 		}
 	],
 	"settings": {

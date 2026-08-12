@@ -172,17 +172,22 @@ service internals are touched:
   shipment `failed` **without** calling Order back (its fulfillment
   machine only moves forward and has no state for a shipping failure).
 
-**Known gap — cart-service never actually retires a cart after checkout**
-(`mark_checked_out` requires a `customer_id` JWT claim no service token can
-carry; see `CLAUDE.md`'s Known gaps and `docs/e2e-platform-test-report.md`
-Finding 7 for the full writeup). Every test above that performs a checkout
-depends on the `checkout_retires_cart` fixture in `conftest.py`, which
-probes this once per session and `pytest.skip()`s the rest with this
-explanation if it's still broken — expect `SKIPPED` rather than a `409`
-pileup until that bug is fixed. This includes the very first checkout in
-the suite: because the buyer persona is a fixed, reused identity across
-runs, an earlier run's un-retired cart also blocks a supposedly-fresh next
-run, not just later scenarios within the same run.
+**Cart retirement after checkout (fixed 2026-08-05, commit `81e3138`)** —
+`mark_checked_out` used to require a `customer_id` JWT claim no service
+token could carry, so a buyer's cart was never actually retired after
+checkout; see `CLAUDE.md`'s Known gaps and `docs/e2e-platform-test-report.md`
+Finding 7 for the full writeup and the fix. Every test above that performs
+a checkout still depends on the `checkout_retires_cart` fixture in
+`conftest.py`, which now runs as a live regression probe rather than a
+known-bug workaround: it checks once per session that a real checkout
+actually retires the buyer's cart, and `pytest.skip()`s the rest with a
+`REGRESSION:`-prefixed explanation if that ever stops being true. Expect
+all tests to run normally; a `SKIPPED` result here means this has broken
+again, not that it's still pending a fix. Because the buyer persona is a
+fixed, reused identity across runs, a leftover non-terminal order from a
+prior run can still produce a one-off `409 order_already_exists` on a
+"fresh" run — that's stale local state, not this bug; cancel the
+offending order and rerun.
 
 ## Step 4: run the complete suite
 

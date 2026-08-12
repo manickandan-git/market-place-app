@@ -166,7 +166,8 @@ the host, use the published ports:
 market-place-app/
 ├── docker-compose.yml       # Full local stack: all services, databases, Redis, worker
 ├── apps/
-│   └── web/                 # Next.js buyer storefront, talks to api-gateway
+│   ├── buyer-portal/        # Next.js buyer storefront, talks to api-gateway
+│   └── seller-portal/       # Angular seller app (planning doc, not yet implemented)
 ├── services/
 │   ├── auth-service/        # Identity: registration, login, tokens, JWKS
 │   ├── notification-service/# Email delivery, Celery worker

@@ -327,41 +327,32 @@ end-to-end checkout works) in `services/order-service/docs/inventory-checkout-co
   back to its originating request. Fix: add `correlation_id` to
   `OutboxEvent` and thread `request_id` through `_event()`, mirroring
   order-service.
-- **A buyer's cart is never actually retired after checkout — `mark_checked_out`
-  always fails with `403 customer_context_required`, silently.**
-  `services/cart-service/app/routes/cart.py`'s
-  `POST /internal/carts/{cart_id}/checked-out` reads
-  `principal.claims.get("customer_id")` from the caller's JWT and rejects
-  the call if it's absent. No token order-service can obtain has this claim:
-  `ServiceTokenRequest` (`services/auth-service/app/schemas.py`,
-  client-credentials grant) only accepts `client_id`/`client_secret`, with
-  no way to embed a per-request `customer_id`. Reproduction: mint an
-  order-service client-credentials token (scope correctly comes back as
-  `inventory:commit cart:checkout`), `POST` it to that endpoint with a real
-  `order_id` → `403 {"error":{"code":"customer_context_required",...}}`.
-  `OrderService.create()` wraps the call in `except ServiceError: pass`, so
-  order creation still returns `201` and the failure is invisible unless
-  something checks the cart's status afterward — which is exactly what
-  `tests/integration-tests/integration_tests/conftest.py`'s
-  `checkout_retires_cart` probe fixture now does (it performs one real
-  checkout, confirms the cart didn't get retired, and skips every
-  dependent test with this explanation, mirroring the `inventory_sync`
-  skip pattern already in the kit). Practical effect in production: a
-  buyer's cart stays `ACTIVE` forever, so **no buyer can ever complete a
-  second checkout** — every later attempt permanently collides with
-  order-service's `uq_order_customer_cart` constraint (not conditional on
-  order status, so even a cancelled/failed prior order still blocks reuse
-  of that `(customer_id, cart_id)` pair) and returns `409
-  order_already_exists`. This is a distinct, deeper bug from the
-  `cart:checkout` scope-registration gap fixed earlier — that fix was
-  necessary but not sufficient. Candidate fixes: (a) let
-  `ServiceTokenRequest` accept a verified, scope-gated `customer_id`/context
-  field embedded as a claim only for pre-approved scopes (needs care
-  against a compromised caller impersonating an arbitrary customer); (b)
-  pass `customer_id` in `MarkCheckedOutRequest`'s body instead — order-service
-  already knows it from its own `Order` row — with cart-service verifying
-  it against the cart's actual owner column (smaller change, matches how
-  `inventory-service`'s `commit`/`release` endpoints already trust scope
-  alone with no per-actor claim delegation); (c) drop the check entirely,
-  same rationale as (b) minus the extra verification. Full writeup in
+- **A buyer's cart never being retired after checkout is now fixed** (commit
+  `81e3138`, "Updated the code based on testing", 2026-08-05). It used to be
+  that `services/cart-service/app/routes/cart.py`'s
+  `POST /internal/carts/{cart_id}/checked-out` read
+  `principal.claims.get("customer_id")` from the caller's JWT and rejected
+  the call if it's absent — a claim no client-credentials service token
+  could ever carry, so the call always 403'd, `OrderService.create()`
+  silently swallowed the failure (`except ServiceError: pass`), and every
+  buyer's cart stayed `ACTIVE` forever, permanently colliding with
+  order-service's `(customer_id, cart_id)` uniqueness on any second
+  checkout. Fixed by moving `customer_id` into `MarkCheckedOutRequest`'s
+  body instead of a JWT claim (`services/cart-service/app/schemas/cart.py`,
+  `app/services/cart_service.py`) — order-service already knows it from its
+  own `Order` row, and cart-service verifies it against the cart's actual
+  owner column before doing anything, matching the trust pattern
+  `inventory-service`'s `commit`/`release` endpoints already use (scope
+  alone is sufficient authority for a trusted internal caller; the body
+  value is checked, not blindly trusted). The same commit also went further
+  than that fix alone required: migration `003_scope_order_cart_uq`
+  replaced the plain `uq_order_customer_cart` unique constraint with a
+  partial unique index scoped to non-terminal statuses
+  (`WHERE status NOT IN ('CANCELLED', 'PAYMENT_FAILED')`), so a
+  cancelled/failed order no longer permanently blocks reuse of that
+  `(customer_id, cart_id)` pair either. Live-verified 2026-08-11 against
+  the running dev stack: `tests/integration-tests`'s
+  `test_checkout_reserves_stock_and_is_idempotent` passes, and the buyer's
+  `GET /api/v1/cart` confirms the cart ID actually changes after checkout.
+  Full writeup, including the live-verification notes, in
   `docs/e2e-platform-test-report.md`'s Finding 7.

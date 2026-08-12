@@ -85,25 +85,21 @@ async def checkout_retires_cart(
     active cart, i.e. whether cart-service's internal `mark_checked_out`
     call (made by order-service after creating an order) succeeds.
 
-    It currently does not: `mark_checked_out` requires a `customer_id`
-    claim on the caller's JWT, but auth-service's client-credentials grant
-    (the only way order-service can obtain a `cart:checkout`-scoped token)
-    has no way to embed one. order-service swallows the resulting 403, so
-    the cart is left ACTIVE forever and every later checkout attempt for
-    that buyer collides with order-service's permanent
-    `(customer_id, cart_id)` uniqueness constraint. See CLAUDE.md's Known
-    gaps for the full writeup and candidate fixes.
+    This used to fail unconditionally (see CLAUDE.md's Known gaps history
+    and `docs/e2e-platform-test-report.md`'s Finding 7 for the full
+    writeup) but was fixed in commit 81e3138: `customer_id` now travels in
+    the request body instead of a JWT claim no service token could carry,
+    and order-service's uniqueness constraint on `(customer_id, cart_id)`
+    was scoped to non-terminal order statuses. This fixture is kept as a
+    live regression probe, not a known-bug workaround -- if either skip
+    below ever fires again on a clean environment, that's a real
+    regression, not expected behavior.
 
     Session-scoped so the probe (a real checkout) only runs once. Every
     test in test_60/70/80 that performs a checkout depends on this fixture
-    -- including the "first" one -- because the bug also breaks
-    cross-run durability: since the buyer persona is a fixed, reused
-    identity, an earlier run's un-retired cart permanently blocks reuse of
-    that `(customer_id, cart_id)` pair even on a supposedly-fresh next
-    run. Skipping instead of failing here matches the `inventory_sync`
-    skip pattern above; once `mark_checked_out` is actually fixed, a real
-    checkout will retire the cart and every dependent test runs normally
-    again, on the first run and every run after.
+    -- including the "first" one -- so a regression here fails the whole
+    dependent suite with one clear skip reason instead of a confusing
+    pileup of unrelated 409s.
     """
     _, variant, _ = await create_stocked_product(
         clients,
@@ -117,20 +113,24 @@ async def checkout_retires_cart(
         await checkout(clients, buyer, cart)
     except ApiError as exc:
         pytest.skip(
-            "cart-service's mark_checked_out never retires the checked-out "
-            "cart (see CLAUDE.md Known gaps), so this buyer's cart is "
-            f"already permanently blocked from a prior checkout: {exc}"
+            "Checkout itself failed for the probe cart, so cart-retirement "
+            "can't be verified this run. If this is a 409 "
+            "order_already_exists, the buyer persona likely has a leftover "
+            "non-terminal order from a prior run/session blocking this "
+            "exact (customer_id, cart_id) pair -- cancel it and rerun "
+            f"before assuming mark_checked_out has regressed: {exc}"
         )
     after = await clients.cart.json(
         "GET", "/api/v1/cart", token=buyer.token, expected=200
     )
     if after["id"] == cart["id"]:
         pytest.skip(
-            "cart-service's mark_checked_out did not retire the cart after "
-            "a successful checkout (requires a customer_id JWT claim the "
-            "client-credentials grant cannot produce) -- see CLAUDE.md "
-            "Known gaps. Any later checkout in this session would collide "
-            "with order-service's permanent (customer_id, cart_id) "
+            "REGRESSION: cart-service's mark_checked_out did not retire "
+            "the cart after a successful checkout. This was fixed in "
+            "commit 81e3138 -- see CLAUDE.md Known gaps and "
+            "docs/e2e-platform-test-report.md's Finding 7 for the original "
+            "bug and its fix. Any later checkout in this session would "
+            "collide with order-service's (customer_id, cart_id) "
             "uniqueness constraint."
         )
 
