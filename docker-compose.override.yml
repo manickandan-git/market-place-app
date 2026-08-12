@@ -49,6 +49,9 @@ services:
   marketplace-inventory-service:
     ports:
       - "8005:8005"
+  marketplace-inventory-redis:
+    ports:
+      - "6382:6379"
   marketplace-cart-db:
     ports:
       - "5438:5432"

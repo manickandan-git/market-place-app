@@ -96,6 +96,11 @@ class Settings(BaseSettings):
         "shipping-service-secret-12345"
     )
     shipping_service_subject: str = "00000000-0000-0000-0000-000000000004"
+    inventory_expire_client_id: str = "inventory-expire-scheduler"
+    inventory_expire_client_secret: str = (
+        "inventory-expire-scheduler-secret-12345"
+    )
+    inventory_expire_subject: str = "00000000-0000-0000-0000-000000000005"
 
     model_config = SettingsConfigDict(
         env_file=".env",

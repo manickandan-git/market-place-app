@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -33,6 +34,8 @@ from app.schemas.inventory import (
     WarehouseCreate,
     WarehouseUpdate,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class InventoryService:
@@ -965,20 +968,45 @@ class InventoryService:
         )
         count = 0
         for reservation in reservations:
+            # Captured up front: begin_nested()'s automatic rollback on
+            # failure expires every object touched inside it, and reading
+            # an expired attribute afterwards (e.g. in the except block
+            # below) triggers an implicit synchronous lazy-load that
+            # crashes with MissingGreenlet under AsyncSession -- the same
+            # class of bug _snapshot() already works around.
+            reservation_id = reservation.id
             item = await self.repo.get_item(
                 reservation.inventory_item_id,
                 for_update=True,
             )
             if not item:
                 continue
-            await self._resolve_reservation(
-                reservation=reservation,
-                item=item,
-                principal=principal,
-                target=ReservationStatus.EXPIRED,
-                reason=MovementReason.RESERVATION_EXPIRED,
-                request_id=request_id,
-            )
+            item_id = item.id
+            try:
+                # A savepoint isolates this reservation's flush: if it
+                # violates a DB constraint (e.g. an item whose
+                # reserved_quantity has already drifted out of sync with
+                # its own reservations), only this row rolls back instead
+                # of poisoning the whole batch. Without this, a single bad
+                # row would sit first in every future sweep (ordered by
+                # expires_at) and permanently block all expiry behind it.
+                async with self.session.begin_nested():
+                    await self._resolve_reservation(
+                        reservation=reservation,
+                        item=item,
+                        principal=principal,
+                        target=ReservationStatus.EXPIRED,
+                        reason=MovementReason.RESERVATION_EXPIRED,
+                        request_id=request_id,
+                    )
+            except Exception:
+                logger.exception(
+                    "Skipping reservation %s during expiry sweep: "
+                    "resolving it against item %s failed",
+                    reservation_id,
+                    item_id,
+                )
+                continue
             count += 1
         await self.session.commit()
         return count

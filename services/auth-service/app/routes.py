@@ -724,6 +724,11 @@ async def issue_service_token(
             settings.shipping_service_subject,
             "orders:fulfillment",
         ),
+        settings.inventory_expire_client_id: (
+            settings.inventory_expire_client_secret,
+            settings.inventory_expire_subject,
+            "inventory:expire",
+        ),
     }
 
     invalid_client = HTTPException(

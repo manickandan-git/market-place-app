@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -375,3 +376,68 @@ async def test_release_reservation_group_rejects_committed_group(session) -> Non
             group_id, MovementReason.CUSTOMER_CANCELLED, None, buyer, None
         )
     assert error.value.code == "reservation_group_not_active"
+
+
+# ---------------------------------------------------------------------------
+# expire_reservations
+# ---------------------------------------------------------------------------
+
+
+async def make_expired_reservation(
+    session,
+    *,
+    item,
+    quantity,
+    customer_id=None,
+) -> InventoryReservation:
+    reservation = InventoryReservation(
+        inventory_item_id=item.id,
+        customer_id=customer_id or uuid4(),
+        quantity=quantity,
+        status=ReservationStatus.ACTIVE,
+        expires_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    session.add(reservation)
+    await session.commit()
+    await session.refresh(reservation)
+    return reservation
+
+
+async def test_expire_reservations_skips_bad_row_and_processes_rest(session) -> None:
+    """Regression test: one reservation whose item's reserved_quantity has
+    already drifted out of sync (so resolving it violates the DB's
+    reserved_quantity >= 0 check) must not block the rest of the sweep --
+    list_expired_active orders by expires_at, so a poisoned row would
+    otherwise sit first in every future batch and permanently wedge expiry
+    for every reservation behind it."""
+    service = InventoryService(session)
+    seller = uuid4()
+
+    poisoned_item = await make_item(
+        session, seller_id=seller, sku="SKU-POISONED", on_hand=10, reserved=0
+    )
+    poisoned_reservation = await make_expired_reservation(
+        session, item=poisoned_item, quantity=5
+    )
+
+    healthy_item = await make_item(
+        session, seller_id=seller, sku="SKU-HEALTHY", on_hand=10, reserved=3
+    )
+    healthy_reservation = await make_expired_reservation(
+        session, item=healthy_item, quantity=3
+    )
+
+    admin = principal(roles=["admin"])
+    count = await service.expire_reservations(admin, None, limit=100)
+
+    assert count == 1
+
+    await session.refresh(healthy_reservation)
+    assert healthy_reservation.status == ReservationStatus.EXPIRED
+    await session.refresh(healthy_item)
+    assert healthy_item.reserved_quantity == 0
+
+    await session.refresh(poisoned_reservation)
+    assert poisoned_reservation.status == ReservationStatus.ACTIVE
+    await session.refresh(poisoned_item)
+    assert poisoned_item.reserved_quantity == 0

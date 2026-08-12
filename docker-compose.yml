@@ -38,12 +38,12 @@ services:
       marketplace-notification-service:
         condition: service_started
 
-  # 3. marketplace-auth-redie
+  # 3. The Auth Redis
   marketplace-auth-redis:
     image: redis:7-alpine
     container_name: marketplace-auth-redis
 
-  # 4. marketplace-auth-redie
+  # 4. Mailpit (dev email capture)
   mailer:
     image: axllent/mailpit
     ports:
@@ -149,7 +149,7 @@ services:
       marketplace-auth-service:
         condition: service_started
 
-  # 11. The Product Service Database
+  # 10. The Product Service Database
   marketplace-product-db:
     image: postgres:16-alpine
     container_name: marketplace-product-service-postgres-db
@@ -165,7 +165,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # 12. The Product Service (API)
+  # 11. The Product Service (API)
   marketplace-product-service:
     build:
       context: ./services/product-service
@@ -195,7 +195,7 @@ services:
       marketplace-auth-service:
         condition: service_started
 
-  # 13. The Inventory Service Database
+  # 12. The Inventory Service Database
   marketplace-inventory-db:
     image: postgres:16-alpine
     container_name: marketplace-inventory-service-postgres-db
@@ -210,6 +210,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # 13. The Inventory Service Redis (Celery broker for the reservation-expiry sweep)
+  marketplace-inventory-redis:
+    image: redis:7-alpine
+    container_name: marketplace-inventory-redis
 
   # 14. The Inventory Service (API)
   marketplace-inventory-service:
@@ -321,7 +326,49 @@ services:
       marketplace-notification-redis:
         condition: service_started
 
-  # 18. The Order Service Database
+  # 18. The Inventory Celery Worker (executes the reservation-expiry sweep task)
+  marketplace-inventory-worker:
+    build:
+      context: ./services/inventory-service
+      dockerfile: Dockerfile
+    environment:
+      - ENVIRONMENT=development
+      - AUTH_SERVICE_URL=http://marketplace-auth-service:8001
+      - INVENTORY_SERVICE_URL=http://marketplace-inventory-service:8005
+      - INVENTORY_EXPIRE_CLIENT_ID=inventory-expire-scheduler
+      - INVENTORY_EXPIRE_CLIENT_SECRET=inventory-expire-scheduler-secret-12345
+      - CELERY_BROKER_URL=redis://marketplace-inventory-redis:6379/0
+    volumes:
+      # Only source dirs are mounted (not the whole service directory): the
+      # image's dependencies are a uv-managed .venv baked in at build time,
+      # and bind-mounting the full directory would shadow it with the host's
+      # own (Windows) .venv and break the container.
+      - ./services/inventory-service/app:/app/app
+    command: sh -c "uv run --no-sync celery -A app.celery_app worker --loglevel=info"
+    depends_on:
+      marketplace-inventory-redis:
+        condition: service_started
+      marketplace-inventory-service:
+        condition: service_started
+      marketplace-auth-service:
+        condition: service_started
+
+  # 19. The Inventory Celery Beat (fires the reservation-expiry sweep on a timer)
+  marketplace-inventory-beat:
+    build:
+      context: ./services/inventory-service
+      dockerfile: Dockerfile
+    environment:
+      - ENVIRONMENT=development
+      - CELERY_BROKER_URL=redis://marketplace-inventory-redis:6379/0
+    volumes:
+      - ./services/inventory-service/app:/app/app
+    command: sh -c "uv run --no-sync celery -A app.celery_app beat --loglevel=info"
+    depends_on:
+      marketplace-inventory-redis:
+        condition: service_started
+
+  # 20. The Order Service Database
   marketplace-order-db:
     image: postgres:16-alpine
     container_name: marketplace-order-service-postgres-db
@@ -337,7 +384,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # 19. The Order Service (API)
+  # 21. The Order Service (API)
   marketplace-order-service:
     build:
       context: ./services/order-service
@@ -379,7 +426,7 @@ services:
       marketplace-notification-service:
         condition: service_started
 
-  # 20. The Payment Service Database
+  # 22. The Payment Service Database
   marketplace-payment-db:
     image: postgres:16-alpine
     container_name: marketplace-payment-service-postgres-db
@@ -395,7 +442,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # 21. The Payment Service (API)
+  # 23. The Payment Service (API)
   marketplace-payment-service:
     build:
       context: ./services/payment-service
@@ -441,7 +488,7 @@ services:
       marketplace-order-service:
         condition: service_started
 
-  # 21b. Stripe CLI, running `stripe listen` so Stripe's real test-mode
+  # 24. Stripe CLI, running `stripe listen` so Stripe's real test-mode
   # webhooks reach payment-service automatically — no host-side `stripe
   # listen` process required anymore. `stripe login` doesn't work in a
   # container (nothing to persist credentials to across recreations), so
@@ -472,7 +519,7 @@ services:
       marketplace-payment-service:
         condition: service_started
 
-  # 22. The Shipping Service Database
+  # 25. The Shipping Service Database
   marketplace-shipping-db:
     image: postgres:16-alpine
     container_name: marketplace-shipping-service-postgres-db
@@ -488,7 +535,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # 23. The Shipping Service (API)
+  # 26. The Shipping Service (API)
   marketplace-shipping-service:
     build:
       context: ./services/shipping-service
@@ -520,7 +567,7 @@ services:
       marketplace-order-service:
         condition: service_started
 
-  # 24. The API Gateway — allowlisted reverse proxy, no database of its own.
+  # 27. The API Gateway — allowlisted reverse proxy, no database of its own.
   # This is the ONLY service that publishes a host port in this base file —
   # every other service/database above is reachable solely over the Docker
   # network. `docker compose -f docker-compose.yml up` (no override) alone
@@ -598,7 +645,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # 26. Ai Assistant Service (API)
+  # 28. Ai Assistant Service (API)
   marketplace-assistant-service:
     build:
       context: ./services/assistant-service
@@ -641,7 +688,7 @@ services:
       marketplace-order-service:
         condition: service_started
 
-  # 27. Web frontend (Next.js, BFF pattern — see apps/buyer-portal/src/lib/config.ts).
+  # 29. Web frontend (Next.js, BFF pattern — see apps/buyer-portal/src/lib/config.ts).
   # Talks to the API gateway only from server-side code (route handlers,
   # Server Components, the proxy) over the Docker network; the browser
   # never calls the gateway directly. Runs `next dev` for hot reload,
@@ -667,7 +714,7 @@ services:
       marketplace-api-gateway:
         condition: service_started
 
-  # 23. Observability stack (dev) — Loki aggregates every container's
+  # 30. Observability stack (dev) — Loki aggregates every container's
   # stdout/stderr (via Promtail, using Docker service discovery so new
   # services are picked up automatically, no per-service config needed),
   # Grafana provides the search/dashboard UI over it. Closes the
