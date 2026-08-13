@@ -1192,6 +1192,8 @@ class InventoryService:
             self._event("inventory.stock.low.v1", item, request_id=request_id)
 
     @staticmethod
-    def _check_version(resource: Any, expected: int) -> None:
+    def _check_version(resource: Any, expected: int | None) -> None:
+        if expected is None:
+            return
         if resource.version != expected:
             raise ServiceError(412, "version_conflict", "Resource version has changed")
