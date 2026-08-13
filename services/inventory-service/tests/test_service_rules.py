@@ -63,4 +63,3 @@ def test_matching_version_is_accepted() -> None:
 def test_no_version_is_accepted() -> None:
     resource = item(uuid4())
     InventoryService._check_version(resource, None)
-    
