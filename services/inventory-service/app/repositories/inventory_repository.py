@@ -100,8 +100,7 @@ class InventoryRepository:
         stmt = select(
             func.coalesce(
                 func.sum(
-                    InventoryItem.on_hand_quantity
-                    - InventoryItem.reserved_quantity
+                    InventoryItem.on_hand_quantity - InventoryItem.reserved_quantity
                 ),
                 0,
             )

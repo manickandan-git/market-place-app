@@ -158,7 +158,10 @@ async def test_batch_reservation_rejects_unknown_sku(session) -> None:
 
     with pytest.raises(ServiceError) as error:
         await service.create_batch_reservation(
-            batch(seller, "NO-SUCH-SKU", 1, customer_id=buyer.subject), buyer, None, None
+            batch(seller, "NO-SUCH-SKU", 1, customer_id=buyer.subject),
+            buyer,
+            None,
+            None,
         )
     assert error.value.code == "invalid_sku"
 

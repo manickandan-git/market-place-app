@@ -1,0 +1,24 @@
+name: inventory-service CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/inventory-service/**'
+      - '.github/workflows/inventory-service-ci.yml'
+      - '.github/workflows/python-service-ci.yml'
+  pull_request:
+    paths:
+      - 'services/inventory-service/**'
+      - '.github/workflows/inventory-service-ci.yml'
+      - '.github/workflows/python-service-ci.yml'
+
+concurrency:
+  group: inventory-service-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/python-service-ci.yml
+    with:
+      service-dir: services/inventory-service

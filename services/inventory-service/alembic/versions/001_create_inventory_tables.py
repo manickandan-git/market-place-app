@@ -187,10 +187,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["inventory_item_id"],
             ["inventory_items.id"],
-            name=(
-                "fk_inventory_reservations_inventory_item_id_"
-                "inventory_items"
-            ),
+            name=("fk_inventory_reservations_inventory_item_id_inventory_items"),
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_inventory_reservations"),
