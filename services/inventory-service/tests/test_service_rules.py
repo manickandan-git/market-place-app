@@ -58,3 +58,9 @@ def test_version_conflict_is_detected() -> None:
 def test_matching_version_is_accepted() -> None:
     resource = item(uuid4())
     InventoryService._check_version(resource, 3)
+
+
+def test_no_version_is_accepted() -> None:
+    resource = item(uuid4())
+    InventoryService._check_version(resource, None)
+    
