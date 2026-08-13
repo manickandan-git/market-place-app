@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     debug: bool = False
     api_prefix: str = "/api/v1"
     database_url: str = (
-        "postgresql+asyncpg://inventory:inventory@localhost:5435/"
+        "postgresql+asyncpg://marketplace:marketplace@localhost:5437/"
         "inventory_service"
     )
     jwt_jwks_url: str = "http://localhost:8001/.well-known/jwks.json"

@@ -12,7 +12,11 @@ from app.models.inventory import (
     MovementReason,
     ReservationStatus,
 )
-from app.schemas.inventory import BatchReservationCreate, BatchReservationLine
+from app.models.reliability import OutboxEvent
+from app.schemas.inventory import (
+    BatchReservationCreate,
+    BatchReservationLine,
+)
 from app.services.inventory_service import InventoryService
 
 
@@ -441,3 +445,37 @@ async def test_expire_reservations_skips_bad_row_and_processes_rest(session) -> 
     assert poisoned_reservation.status == ReservationStatus.ACTIVE
     await session.refresh(poisoned_item)
     assert poisoned_item.reserved_quantity == 0
+
+
+async def test_batch_reservation_correlation_id_is_recorded(session) -> None:
+    """Regression test for the OutboxEvent correlation-ID gap: _event()
+    writes aggregate_type="inventory_item" and aggregate_id=item.id
+    regardless of whether a reservation is attached (see _event()'s body),
+    so the created event is looked up by the item, not the reservation."""
+    service = InventoryService(session)
+    seller = uuid4()
+    item = await make_item(session, seller_id=seller, sku="SKU-1", on_hand=20)
+    buyer = principal(roles=["buyer"])
+    request_id = "test-request-id-123"
+
+    group_id, reservations = await service.create_batch_reservation(
+        batch(seller, "SKU-1", 5, customer_id=buyer.subject), buyer, request_id, None
+    )
+
+    assert len(reservations) == 1
+    assert reservations[0].reservation_group_id == group_id
+    assert reservations[0].quantity == 5
+    assert reservations[0].status == ReservationStatus.ACTIVE
+
+    outbox_event = (
+        await session.scalars(
+            select(OutboxEvent).where(
+                OutboxEvent.aggregate_type == "inventory_item",
+                OutboxEvent.aggregate_id == item.id,
+                OutboxEvent.event_type == "inventory.reservation.created.v1",
+            )
+        )
+    ).first()
+
+    assert outbox_event is not None
+    assert outbox_event.correlation_id == request_id

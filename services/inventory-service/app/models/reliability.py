@@ -42,6 +42,7 @@ class OutboxEvent(Base, UUIDPrimaryKeyMixin):
         nullable=False,
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    correlation_id: Mapped[str | None] = mapped_column(String(100))
 
 
 class IdempotencyRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin):

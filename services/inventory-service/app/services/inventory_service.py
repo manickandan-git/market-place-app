@@ -108,6 +108,7 @@ class InventoryService:
         item: InventoryItem,
         *,
         reservation: InventoryReservation | None = None,
+        request_id: str | None,
     ) -> None:
         payload = {
             "event_version": 1,
@@ -140,6 +141,7 @@ class InventoryService:
                 aggregate_id=item.id,
                 event_type=event_type,
                 payload=payload,
+                correlation_id=request_id,
             )
         )
 
@@ -336,7 +338,7 @@ class InventoryService:
             after=await self._snapshot(item),
             request_id=request_id,
         )
-        self._event("inventory.item.created.v1", item)
+        self._event("inventory.item.created.v1", item, request_id=request_id)
         if idempotency_key:
             self.session.add(
                 IdempotencyRecord(
@@ -375,7 +377,7 @@ class InventoryService:
             after=await self._snapshot(item),
             request_id=request_id,
         )
-        self._event("inventory.item.updated.v1", item)
+        self._event("inventory.item.updated.v1", item, request_id=request_id)
         await self.session.commit()
         await self.session.refresh(item)
         return item
@@ -433,8 +435,8 @@ class InventoryService:
             after=await self._snapshot(item),
             request_id=request_id,
         )
-        self._event("inventory.stock.adjusted.v1", item)
-        self._add_low_stock_event_if_needed(item)
+        self._event("inventory.stock.adjusted.v1", item, request_id=request_id)
+        self._add_low_stock_event_if_needed(item, request_id=request_id)
         if idempotency_key:
             self.session.add(
                 IdempotencyRecord(
@@ -538,8 +540,13 @@ class InventoryService:
             after=await self._snapshot(item),
             request_id=request_id,
         )
-        self._event("inventory.reservation.created.v1", item, reservation=reservation)
-        self._add_low_stock_event_if_needed(item)
+        self._event(
+            "inventory.reservation.created.v1",
+            item,
+            reservation=reservation,
+            request_id=request_id,
+        )
+        self._add_low_stock_event_if_needed(item, request_id=request_id)
         if idempotency_key:
             self.session.add(
                 IdempotencyRecord(
@@ -677,7 +684,7 @@ class InventoryService:
                 after=await self._snapshot(item),
                 request_id=request_id,
             )
-            self._add_low_stock_event_if_needed(item)
+            self._add_low_stock_event_if_needed(item, request_id=request_id)
         for reservation in reservations:
             item, _ = touched[reservation.inventory_item_id]
             self._audit(
@@ -693,6 +700,7 @@ class InventoryService:
                 "inventory.reservation.created.v1",
                 item,
                 reservation=reservation,
+                request_id=request_id,
             )
 
         if idempotency_key:
@@ -791,6 +799,7 @@ class InventoryService:
                 "inventory.reservation.committed.v1",
                 item,
                 reservation=reservation,
+                request_id=request_id,
             )
         await self.session.commit()
         for reservation in reservations:
@@ -926,7 +935,12 @@ class InventoryService:
             "reservation.committed",
             request_id,
         )
-        self._event("inventory.reservation.committed.v1", item, reservation=reservation)
+        self._event(
+            "inventory.reservation.committed.v1",
+            item,
+            reservation=reservation,
+            request_id=request_id,
+        )
         await self.session.commit()
         await self.session.refresh(reservation)
         return reservation
@@ -1095,6 +1109,7 @@ class InventoryService:
             f"inventory.reservation.{target.value}.v1",
             item,
             reservation=reservation,
+            request_id=request_id,
         )
 
     async def _audit_resolution(
@@ -1170,9 +1185,11 @@ class InventoryService:
             )
         return existing
 
-    def _add_low_stock_event_if_needed(self, item: InventoryItem) -> None:
+    def _add_low_stock_event_if_needed(
+        self, item: InventoryItem, *, request_id: str | None
+    ) -> None:
         if item.available_quantity <= item.low_stock_threshold:
-            self._event("inventory.stock.low.v1", item)
+            self._event("inventory.stock.low.v1", item, request_id=request_id)
 
     @staticmethod
     def _check_version(resource: Any, expected: int) -> None:
